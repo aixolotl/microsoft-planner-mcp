@@ -1,0 +1,22 @@
+name: "Bug Report"
+description: "Report a problem or unexpected behavior"
+title: "[Bug] "
+labels: []
+type: bug
+body:
+  - type: textarea
+    attributes:
+      label: Steps to Reproduce
+      description: How can we reproduce the bug?
+  - type: textarea
+    attributes:
+      label: Expected Behavior
+      description: What should happen?
+  - type: textarea
+    attributes:
+      label: Technical Details
+      description: Additional information about the issue based on initial investigation.
+  - type: textarea
+    attributes:
+      label: Screenshots / Logs
+      description: Add any relevant screenshots or logs

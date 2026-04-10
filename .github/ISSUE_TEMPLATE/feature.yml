@@ -1,0 +1,26 @@
+name: "Feature Request"
+description: "Propose a new feature or enhancement"
+title: "[Feature] "
+labels: []
+type: feature
+body:
+  - type: textarea
+    attributes:
+      label: Summary
+      description: Briefly describe the feature
+  - type: textarea
+    attributes:
+      label: Acceptance Criteria
+      description: List specific, testable outcomes that must be met.
+      placeholder: |
+        - [ ] Feature is available from the UI
+        - [ ] Works with existing API
+        - [ ] Documentation updated
+  - type: textarea
+    attributes:
+      label: Implementation Details
+      description: Optional technical notes, architecture ideas, or dependencies.
+      placeholder: |
+        - Possible API changes
+        - Database schema updates
+        - New components required
