@@ -1,4 +1,6 @@
 from fastmcp import FastMCP
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
@@ -24,7 +26,18 @@ async def health_check(request: Request) -> JSONResponse:
 
 
 # ASGI app — used by uvicorn in production: uvicorn src.server:app
-app = mcp.http_app(stateless_http=True)
+app = mcp.http_app(
+    stateless_http=True,
+    middleware=[
+        Middleware(
+            CORSMiddleware,
+            allow_origins=["*"],
+            allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+            allow_headers=["mcp-protocol-version", "mcp-session-id", "Authorization", "Content-Type"],
+            expose_headers=["mcp-session-id"],
+        )
+    ],
+)
 
 if __name__ == "__main__":
     mcp.run(

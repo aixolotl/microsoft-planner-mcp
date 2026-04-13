@@ -4,6 +4,10 @@ services:
     # Build the image from the Dockerfile in the current directory
     build: .
 
+    # Load environment variables from .env file
+    env_file:
+      - .env
+
     # Host the MCP server on port 8000
     ports:
       - "8000:8000"
