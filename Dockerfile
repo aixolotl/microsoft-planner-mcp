@@ -43,5 +43,4 @@ ENTRYPOINT []
 USER nonroot
 
 # Run the MCP server
-# Uses watchfiles for hot-reload when files change (works with compose watch sync)
-CMD ["uv", "run", "watchfiles", "python server.py", "/app"]
+CMD ["uv", "run", "uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]

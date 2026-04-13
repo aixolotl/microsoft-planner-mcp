@@ -1,6 +1,20 @@
 # microsoft-planner-mcp
 
-An MCP server for Microsoft Planner built with [fastmcp](https://github.com/jlowin/fastmcp).
+An MCP server for Microsoft Planner built with [fastmcp](https://github.com/jlowin/fastmcp), authenticated via Microsoft Entra ID (Azure AD) using the On-Behalf-Of flow to call Microsoft Graph.
+
+## Azure App Registration
+
+1. Go to **Azure Portal → Microsoft Entra ID → App registrations → New registration**
+2. Set the **Redirect URI** to `Web` → `http://localhost:8000/auth/callback`
+3. Under **Expose an API**:
+   - Set the Application ID URI (default: `api://<client-id>`)
+   - Add a scope named **`mcp-access`** (admin consent required)
+4. Under **Manifest**, set `"requestedAccessTokenVersion": 2`
+5. Under **API permissions → Add a permission → Microsoft Graph → Delegated**:
+   - Add `Tasks.ReadWrite` and `User.Read`
+   - Click **Grant admin consent**
+6. Under **Certificates & secrets**, create a client secret and copy the value
+7. Note your **Application (client) ID** and **Directory (tenant) ID**
 
 ## Setup
 
@@ -11,13 +25,23 @@ An MCP server for Microsoft Planner built with [fastmcp](https://github.com/jlow
 git clone https://github.com/raunakburrows/microsoft-planner-mcp
 cd microsoft-planner-mcp
 uv sync
+
+# Configure environment
+cp .env.example .env
+# Edit .env and fill in CLIENT_ID, CLIENT_SECRET, TENANT_ID
 ```
 
 ## Running the Server
 
 ```bash
-uv run python server.py
+# Development (auto-reload)
+uv run uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload
+
+# Or with the __main__ guard
+uv run python src/server.py
 ```
+
+Server is available at `http://localhost:8000/mcp`. Health check at `http://localhost:8000/health`.
 
 ## Running with Docker
 
@@ -35,17 +59,7 @@ docker compose up --watch
 How it works:
 1. You save a `.py` file locally
 2. `compose watch` syncs it into `/app` in the container
-3. `watchfiles` detects the change and restarts `python server.py`
-
-## Previewing App UIs Locally
-
-To preview tools that return a visual UI (`app=True`) in your browser without needing a full MCP host:
-
-```bash
-uv run fastmcp dev apps server.py
-```
-
-This opens a browser-based preview showing all app tools (those decorated with `app=True`).
+3. `uvicorn --reload` detects the change and restarts the server
 
 ## Testing with MCP Inspector
 
@@ -53,7 +67,7 @@ To test all tools (including non-UI tools like `health`) interactively in a brow
 
 1. Start the server:
    ```bash
-   uv run server.py
+   uv run python src/server.py
    ```
    Or with Docker:
    ```bash
