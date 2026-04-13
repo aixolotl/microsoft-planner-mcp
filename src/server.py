@@ -2,7 +2,7 @@ from fastmcp import FastMCP
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse
+from starlette.responses import JSONResponse, RedirectResponse
 
 from .auth_provider import auth
 from .tools.me import me_router
@@ -23,6 +23,15 @@ mcp.mount(me_router)
 @mcp.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
     return JSONResponse({"status": "healthy", "service": "planner-mcp"})
+
+
+@mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
+async def oauth_protected_resource_root(request: Request) -> RedirectResponse:
+    # Some OAuth clients (e.g. MCP Inspector) request the root path; redirect
+    # to the FastMCP-managed path that carries the actual metadata.
+    return RedirectResponse(
+        url="/.well-known/oauth-protected-resource/mcp", status_code=301
+    )
 
 
 # ASGI app — used by uvicorn in production: uvicorn src.server:app
