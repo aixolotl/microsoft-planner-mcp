@@ -335,6 +335,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f5/48/84b6dcba793178a44b9d99b4def6cd62f870dcfc5bb7b9153ac390135812/fastmcp-3.2.3-py3-none-any.whl", hash = "sha256:cc50af6eed1f62ed8b6ebf4987286d8d1d006f08d5bec739d5c7fb76160e0911", size = 707260, upload-time = "2026-04-09T22:05:01.225Z" },
 ]
 
+[package.optional-dependencies]
+apps = [
+    { name = "prefab-ui" },
+]
+
 [[package]]
 name = "h11"
 version = "0.16.0"
@@ -562,11 +567,11 @@ name = "microsoft-planner-mcp"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "fastmcp" },
+    { name = "fastmcp", extra = ["apps"] },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "fastmcp", specifier = ">=3.2.3" }]
+requires-dist = [{ name = "fastmcp", extras = ["apps"], specifier = ">=3.2.3" }]
 
 [[package]]
 name = "more-itertools"
@@ -627,6 +632,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/9f/4a/0883b8e3802965322523f0b200ecf33d31f10991d0401162f4b23c698b42/platformdirs-4.9.6.tar.gz", hash = "sha256:3bfa75b0ad0db84096ae777218481852c0ebc6c727b3168c1b9e0118e458cf0a", size = 29400, upload-time = "2026-04-09T00:04:10.812Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/75/a6/a0a304dc33b49145b21f4808d763822111e67d1c3a32b524a1baf947b6e1/platformdirs-4.9.6-py3-none-any.whl", hash = "sha256:e61adb1d5e5cb3441b4b7710bea7e4c12250ca49439228cc1021c00dcfac0917", size = 21348, upload-time = "2026-04-09T00:04:09.463Z" },
+]
+
+[[package]]
+name = "prefab-ui"
+version = "0.19.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "cyclopts" },
+    { name = "pydantic" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/64/d1/c4459a29b85e411846da69c6c96f43d62d8e2ac9f57391186dc668771641/prefab_ui-0.19.0.tar.gz", hash = "sha256:e735b00207e85e3c9de67df22fa8da2073ec158abd6337b6d092b23cf9cbd9f6", size = 4078835, upload-time = "2026-04-10T00:16:34.743Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/10/03/badf1b950f00353eee2e58c2357533412faa24ed8b3cf6b7643bdd24fc87/prefab_ui-0.19.0-py3-none-any.whl", hash = "sha256:37be5995241de6f5483a670675a764c428897aff4b4cf3ef88ca630c3e119d6e", size = 1848525, upload-time = "2026-04-10T00:16:32.365Z" },
 ]
 
 [[package]]
