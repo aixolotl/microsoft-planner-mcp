@@ -1,3 +1,4 @@
+import datetime
 from prefab_ui.app import PrefabApp
 from prefab_ui.components import Badge, Column, Heading, Row, Text
 from fastmcp import FastMCP
@@ -22,13 +23,33 @@ def greet(name: str) -> PrefabApp:
 @mcp.tool
 def health() -> dict:
     """Returns health and status information about the MCP server."""
-    import datetime
     return {
         "status": "ok",
         "server": "My MCP Server",
         "version": "1.0.0",
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
+
+
+@mcp.tool(app=True)
+def health_ui() -> PrefabApp:
+    """Shows health and status information as a visual card."""
+    now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    with Column(gap=4, css_class="p-6") as view:
+        Heading("Server Health")
+        with Row(gap=2, align="center"):
+            Text("Status")
+            Badge("OK", variant="success")
+        with Row(gap=2, align="center"):
+            Text("Server")
+            Badge("My MCP Server", variant="default")
+        with Row(gap=2, align="center"):
+            Text("Version")
+            Badge("1.0.0", variant="default")
+        with Row(gap=2, align="center"):
+            Text("Timestamp")
+            Text(now)
+    return PrefabApp(view=view)
 
 if __name__ == "__main__":
     mcp.run(
