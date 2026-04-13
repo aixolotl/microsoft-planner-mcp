@@ -25,7 +25,7 @@ def health() -> dict:
     """Returns health and status information about the MCP server."""
     return {
         "status": "ok",
-        "server": "My MCP Server",
+        "server": "Microsoft Planner MCP Server",
         "version": "1.0.0",
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     }
