@@ -50,6 +50,18 @@ Server is available at `http://localhost:8000/mcp`. Health check at `http://loca
 docker compose up
 ```
 
+## Running Tests
+
+```bash
+uv run pytest
+```
+
+Run with verbose output:
+
+```bash
+uv run pytest -v
+```
+
 ## Testing with MCP Inspector
 
 To test all tools (including non-UI tools like `health`) interactively in a browser:
