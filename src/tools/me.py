@@ -14,4 +14,5 @@ async def get_me() -> User | None:
         raise ValueError("No access token available")
 
     graph_client = graph_client_manager.for_user(token.token)
-    return await graph_client.me.get()
+    async with graph_client as client:
+        return await client.me.get()
