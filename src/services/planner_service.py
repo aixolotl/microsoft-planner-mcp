@@ -32,22 +32,16 @@ class PlannerService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    def _patch_config(etag: str) -> RequestConfiguration:
-        """RequestConfiguration with If-Match and Prefer: return=representation.
+    def _make_config(etag: str, *, prefer_representation: bool = False) -> RequestConfiguration:
+        """Build a RequestConfiguration with If-Match and optionally Prefer: return=representation.
 
         HeadersCollection must be passed explicitly — RequestConfiguration uses
         a shared mutable default for `headers` that would bleed across calls.
         """
         headers = HeadersCollection()
         headers.add("If-Match", etag)
-        headers.add("Prefer", "return=representation")
-        return RequestConfiguration(headers=headers)
-
-    @staticmethod
-    def _delete_config(etag: str) -> RequestConfiguration:
-        """RequestConfiguration with only the If-Match header."""
-        headers = HeadersCollection()
-        headers.add("If-Match", etag)
+        if prefer_representation:
+            headers.add("Prefer", "return=representation")
         return RequestConfiguration(headers=headers)
 
     async def _refresh_task_etag(self, task_id: str) -> str:
@@ -57,6 +51,15 @@ class PlannerService:
         if not etag:
             raise ValueError(f"No @odata.etag found on task {task_id!r}")
         return etag
+
+    async def _with_retry(self, task_id: str, etag: str, operation):
+        """Run ``operation(etag)``, retrying once with a fresh ETag on 412/409."""
+        try:
+            return await operation(etag)
+        except ODataError as exc:
+            if exc.response_status_code not in (409, 412):
+                raise
+            return await operation(await self._refresh_task_etag(task_id))
 
     # ------------------------------------------------------------------
     # Public API
@@ -68,37 +71,17 @@ class PlannerService:
         body: PlannerTask,
         etag: str,
     ) -> PlannerTask | None:
-        """PATCH a task.  Retries once with a fresh ETag on 412/409.
-
-        Returns the updated PlannerTask when the server honours
-        ``Prefer: return=representation``, otherwise ``None``.
-        All other ODataErrors are re-raised as-is.
-        """
-        try:
-            return await self._client.planner.tasks.by_planner_task_id(
-                task_id
-            ).patch(body, request_configuration=self._patch_config(etag))
-        except ODataError as exc:
-            if exc.response_status_code not in (409, 412):
-                raise
-            fresh_etag = await self._refresh_task_etag(task_id)
-            return await self._client.planner.tasks.by_planner_task_id(
-                task_id
-            ).patch(body, request_configuration=self._patch_config(fresh_etag))
+        """PATCH a task.  Retries once with a fresh ETag on 412/409."""
+        item = self._client.planner.tasks.by_planner_task_id(task_id)
+        return await self._with_retry(
+            task_id, etag,
+            lambda e: item.patch(body, request_configuration=self._make_config(e, prefer_representation=True)),
+        )
 
     async def delete_task(self, task_id: str, etag: str) -> None:
-        """DELETE a task.  Retries once with a fresh ETag on 412/409.
-
-        All other ODataErrors are re-raised as-is.
-        """
-        try:
-            await self._client.planner.tasks.by_planner_task_id(
-                task_id
-            ).delete(request_configuration=self._delete_config(etag))
-        except ODataError as exc:
-            if exc.response_status_code not in (409, 412):
-                raise
-            fresh_etag = await self._refresh_task_etag(task_id)
-            await self._client.planner.tasks.by_planner_task_id(
-                task_id
-            ).delete(request_configuration=self._delete_config(fresh_etag))
+        """DELETE a task.  Retries once with a fresh ETag on 412/409."""
+        item = self._client.planner.tasks.by_planner_task_id(task_id)
+        await self._with_retry(
+            task_id, etag,
+            lambda e: item.delete(request_configuration=self._make_config(e)),
+        )
