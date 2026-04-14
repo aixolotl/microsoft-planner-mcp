@@ -21,10 +21,10 @@ An MCP server for Microsoft Planner built with [fastmcp](https://github.com/jlow
 **Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 ```bash
-# Clone and install dependencies
+# Clone and install dependencies (including dev tools)
 git clone https://github.com/raunakburrows/microsoft-planner-mcp
 cd microsoft-planner-mcp
-uv sync
+uv sync --dev
 
 # Configure environment
 cp .env.example .env
@@ -34,8 +34,8 @@ cp .env.example .env
 ## Running the Server
 
 ```bash
-# Development (auto-reload)
-uv run uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload
+# Development
+uv run uvicorn src.server:app --host 0.0.0.0 --port 8000
 
 # Or with the __main__ guard
 uv run python src/server.py
@@ -50,16 +50,19 @@ Server is available at `http://localhost:8000/mcp`. Health check at `http://loca
 docker compose up
 ```
 
-**With hot reload** — file changes sync into the container and the server restarts automatically:
+## Running Tests
+
+Requires dev dependencies (`uv sync --dev` in setup above).
 
 ```bash
-docker compose up --watch
+uv run pytest
 ```
 
-How it works:
-1. You save a `.py` file locally
-2. `compose watch` syncs it into `/app` in the container
-3. `uvicorn --reload` detects the change and restarts the server
+Run with verbose output:
+
+```bash
+uv run pytest -v
+```
 
 ## Testing with MCP Inspector
 
