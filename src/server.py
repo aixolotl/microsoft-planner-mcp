@@ -6,6 +6,7 @@ from starlette.responses import JSONResponse, RedirectResponse
 
 from .auth_provider import auth
 from .tools.me import me_router
+from .tools.plans import plans_router
 
 mcp = FastMCP(
     "Planner MCP",
@@ -18,6 +19,7 @@ mcp = FastMCP(
 )
 
 mcp.mount(me_router)
+mcp.mount(plans_router)
 
 
 @mcp.custom_route("/health", methods=["GET"])
