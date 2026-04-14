@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 .git/
+.env
+.env.*
 .gitignore
-README.md
 compose.yaml

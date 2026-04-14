@@ -34,8 +34,8 @@ cp .env.example .env
 ## Running the Server
 
 ```bash
-# Development (auto-reload)
-uv run uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload
+# Development
+uv run uvicorn src.server:app --host 0.0.0.0 --port 8000
 
 # Or with the __main__ guard
 uv run python src/server.py
@@ -49,17 +49,6 @@ Server is available at `http://localhost:8000/mcp`. Health check at `http://loca
 # Build and start
 docker compose up
 ```
-
-**With hot reload** — file changes sync into the container and the server restarts automatically:
-
-```bash
-docker compose up --watch
-```
-
-How it works:
-1. You save a `.py` file locally
-2. `compose watch` syncs it into `/app` in the container
-3. `uvicorn --reload` detects the change and restarts the server
 
 ## Testing with MCP Inspector
 

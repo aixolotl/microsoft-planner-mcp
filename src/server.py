@@ -1,3 +1,5 @@
+import logging
+
 from fastmcp import FastMCP
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
@@ -5,7 +7,14 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 
 from .auth_provider import auth
+from .config import settings
 from .tools.me import me_router
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     "Microsoft Planner MCP",
@@ -40,7 +49,7 @@ app = mcp.http_app(
     middleware=[
         Middleware(
             CORSMiddleware,
-            allow_origins=["*"],
+            allow_origins=settings.ALLOWED_ORIGINS,
             allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
             allow_headers=["mcp-protocol-version", "mcp-session-id", "Authorization", "Content-Type"],
             expose_headers=["mcp-session-id"],
