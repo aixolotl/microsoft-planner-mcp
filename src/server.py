@@ -5,6 +5,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 
 from .auth_provider import auth
+from .config import settings
 from .tools.me import me_router
 from .tools.plans import plans_router
 
@@ -42,7 +43,7 @@ app = mcp.http_app(
     middleware=[
         Middleware(
             CORSMiddleware,
-            allow_origins=["*"],
+            allow_origins=settings.CORS_ORIGINS,
             allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
             allow_headers=["mcp-protocol-version", "mcp-session-id", "Authorization", "Content-Type"],
             expose_headers=["mcp-session-id"],
