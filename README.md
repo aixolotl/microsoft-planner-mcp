@@ -35,7 +35,7 @@ cp .env.example .env
 
 ```bash
 # Development
-uv run uvicorn src.server:app --host 0.0.0.0 --port 8000
+uv run uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload
 
 # Or with the __main__ guard
 uv run python src/server.py
