@@ -8,7 +8,7 @@ from .auth_provider import auth
 from .tools.me import me_router
 
 mcp = FastMCP(
-    "Planner MCP",
+    "Microsoft Planner MCP",
     auth=auth,
     instructions=(
         "MCP server for Microsoft Planner. "
