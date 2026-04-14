@@ -14,11 +14,16 @@ is raised from _refresh_task_etag.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
+
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from kiota_abstractions.headers_collection import HeadersCollection
 from msgraph import GraphServiceClient
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
+
+T = TypeVar("T")
 
 
 class PlannerService:
@@ -52,7 +57,7 @@ class PlannerService:
             raise ValueError(f"No @odata.etag found on task {task_id!r}")
         return etag
 
-    async def _with_retry(self, task_id: str, etag: str, operation):
+    async def _with_retry(self, task_id: str, etag: str, operation: Callable[[str], Awaitable[T]]) -> T:
         """Run ``operation(etag)``, retrying once with a fresh ETag on 412/409."""
         try:
             return await operation(etag)
