@@ -21,10 +21,10 @@ An MCP server for Microsoft Planner built with [fastmcp](https://github.com/jlow
 **Prerequisites:** Python 3.12+, [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 ```bash
-# Clone and install dependencies
+# Clone and install dependencies (including dev tools)
 git clone https://github.com/raunakburrows/microsoft-planner-mcp
 cd microsoft-planner-mcp
-uv sync
+uv sync --dev
 
 # Configure environment
 cp .env.example .env
@@ -48,6 +48,20 @@ Server is available at `http://localhost:8000/mcp`. Health check at `http://loca
 ```bash
 # Build and start
 docker compose up
+```
+
+## Running Tests
+
+Requires dev dependencies (`uv sync --dev` in setup above).
+
+```bash
+uv run pytest
+```
+
+Run with verbose output:
+
+```bash
+uv run pytest -v
 ```
 
 ## Testing with MCP Inspector
