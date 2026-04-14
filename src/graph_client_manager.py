@@ -52,4 +52,5 @@ class GraphClientManager:
         finally:
             await credential.close()
 
+
 graph_client_manager = GraphClientManager()

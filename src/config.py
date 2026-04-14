@@ -10,4 +10,5 @@ class Settings(BaseSettings):
     BASE_URL: str = "http://localhost:8000"
     ALLOWED_ORIGINS: list[str] = ["http://localhost:8000"]
 
+
 settings = Settings()  # ty:ignore[missing-argument]
