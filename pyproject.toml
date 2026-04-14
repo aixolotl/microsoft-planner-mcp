@@ -17,6 +17,7 @@ dev = [
 ]
 
 [tool.pytest]
+minversion = "9.0"
 testpaths = ["tests"]
 asyncio_mode = "strict"
 addopts = ["--import-mode=importlib"]

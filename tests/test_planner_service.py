@@ -61,7 +61,7 @@ def make_graph_client(
 @pytest.mark.parametrize("prefer,expect_prefer", [
     (True, {"return=representation"}),
     (False, set()),
-])
+], ids=["prefer-on", "prefer-off"])
 def test_make_config_headers(prefer, expect_prefer):
     config = PlannerService(MagicMock())._make_config('"etag-abc"', prefer_representation=prefer)
     assert config.headers.get("if-match") == {'"etag-abc"'}
