@@ -7,7 +7,9 @@ Uses SDK primitives only:
 - Read-Resolve-Retry on 412/409: re-GETs the task for a fresh ETag, retries once.
 
 All non-retryable errors surface as ODataError directly; callers can inspect
-.error.code and .error.message for details.
+.error.code and .error.message for details.  If the retry path cannot resolve
+a fresh ETag (task missing or response contains no @odata.etag), a ValueError
+is raised from _refresh_task_etag.
 """
 
 from __future__ import annotations
