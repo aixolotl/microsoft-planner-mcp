@@ -22,4 +22,4 @@ jobs:
         run: uv sync --dev
 
       - name: Run tests
-        run: uv run pytest -v
+        run: uv run pytest -v --doctest-modules --junitxml=junit/test-results.xml 
