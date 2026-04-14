@@ -1,0 +1,11 @@
+[project]
+name = "microsoft-planner-mcp"
+version = "0.1.0"
+description = "MCP server for Microsoft Planner via Microsoft Graph"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "fastmcp[apps]>=3.2.3",
+    "msgraph-sdk>=1.55.0",
+    "pydantic-settings>=2.13.1",
+]
