@@ -43,4 +43,4 @@ ENTRYPOINT []
 USER nonroot
 
 # Run the MCP server
-CMD ["uv", "run", "uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+CMD ["uv", "run", "uvicorn", "src.server:app", "--host", "0.0.0.0", "--port", "8000"]
