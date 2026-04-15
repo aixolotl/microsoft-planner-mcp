@@ -35,21 +35,21 @@ Do **not** add comments to obvious code (simple assignments, straightforward ret
 
 ## Client Logging (`ctx`)
 
-Use `get_context()` from `fastmcp.server.dependencies` to access the MCP context inside a tool. It raises `RuntimeError` when called outside a request (e.g. in unit tests), so guard it:
+Use `get_optional_context()` from `src.deps` to access the MCP context inside a tool. This is a project-level wrapper around `get_context()` from `fastmcp.server.dependencies` that returns `None` instead of raising `RuntimeError` when called outside a request (e.g. in unit tests):
 
 ```python
-from fastmcp.server.dependencies import get_access_token, get_context
+from fastmcp.server.dependencies import get_access_token
 
-try:
-    ctx = get_context()
-except RuntimeError:
-    ctx = None
+from ..deps import get_optional_context
+
+ctx = get_optional_context()
 
 if ctx is not None:
     await ctx.info("Fetching items...")
 ```
 
-Do **not** add `ctx: Context | None = None` to tool signatures — `get_context()` keeps the MCP parameter schema clean and avoids leaking internal plumbing to LLM clients.
+Do **not** use the raw `try/except RuntimeError` pattern inline — use `get_optional_context()` instead.
+Do **not** add `ctx: Context | None = None` to tool signatures — it leaks internal plumbing to LLM clients.
 
 Use `ctx.info()` for user-visible progress on multi-step or paginated operations.
 Use `ctx.debug()` for single fast calls where intermediate state is not interesting to the user.
@@ -74,6 +74,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 
+from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
 from ..services.planner_service import PlannerService
 
@@ -94,6 +95,9 @@ async def list_things() -> list[Thing] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
+    ctx = get_optional_context()
+    if ctx is not None:
+        await ctx.info("Fetching things...")
     async with graph_client_manager.for_user(token.token) as graph_client:
         service = PlannerService(graph_client)
         results = await service.list_things()

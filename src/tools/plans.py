@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
-from fastmcp.server.dependencies import get_access_token, get_context
+from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
 from msgraph.generated.users.item.planner.plans.plans_request_builder import PlansRequestBuilder
 
+from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
 from ..services.planner_service import PlannerService
 
@@ -33,14 +34,7 @@ async def list_my_plans(
     if token is None:
         raise AuthorizationError("No access token available")
 
-    # get_context() retrieves the active MCP context inside a FastMCP request.
-    # It raises RuntimeError when called outside a request (e.g. unit tests);
-    # ctx = None in that case so logging is safely skipped.
-    # Docs: https://gofastmcp.com/servers/context#via-get_context-function
-    try:
-        ctx = get_context()
-    except RuntimeError:
-        ctx = None
+    ctx = get_optional_context()
 
     if ctx is not None:
         await ctx.info("Fetching Planner plans for the authenticated user")
@@ -90,10 +84,7 @@ async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
     if token is None:
         raise AuthorizationError("No access token available")
 
-    try:
-        ctx = get_context()
-    except RuntimeError:
-        ctx = None
+    ctx = get_optional_context()
 
     if ctx is not None:
         await ctx.info(f"Fetching Planner plans for group {group_id}")

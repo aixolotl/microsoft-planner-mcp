@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
-from fastmcp.server.dependencies import get_access_token, get_context
+from fastmcp.server.dependencies import get_access_token
 from msgraph.generated.models.planner_bucket import PlannerBucket
 
+from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
 from ..services.planner_service import PlannerService
 
@@ -28,14 +29,7 @@ async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
     if token is None:
         raise AuthorizationError("No access token available")
 
-    # get_context() retrieves the active MCP context inside a FastMCP request.
-    # It raises RuntimeError when called outside a request (e.g. unit tests);
-    # ctx = None in that case so logging is safely skipped.
-    # Docs: https://gofastmcp.com/servers/context#via-get_context-function
-    try:
-        ctx = get_context()
-    except RuntimeError:
-        ctx = None
+    ctx = get_optional_context()
 
     if ctx is not None:
         await ctx.info(f"Fetching buckets for plan {plan_id}")

@@ -19,7 +19,9 @@ MCP server for Microsoft Planner built with FastMCP and Microsoft Graph SDK. Aut
   - `src/server.py` — FastMCP app, middleware, route mounting
   - `src/config.py` — `Settings` via `pydantic_settings.BaseSettings`
   - `src/auth_provider.py` — Azure OAuth provider
+  - `src/deps.py` — shared dependency helpers (e.g. `get_optional_context()`)
   - `src/graph_client_manager.py` — singleton `GraphClientManager` with per-user OBO clients
+  - `src/types.py` — shared structural types (e.g. `CollectionRequestBuilder` Protocol)
   - `src/services/` — business logic wrapping Graph SDK calls
   - `src/tools/` — FastMCP tool routers (one router per domain, mounted in `server.py`)
 - `tests/` — unit tests mirroring `src/` structure
@@ -32,5 +34,6 @@ MCP server for Microsoft Planner built with FastMCP and Microsoft Graph SDK. Aut
 - Tools that require business logic instantiate the relevant service inside the `async with` block: `service = PlannerService(graph_client)`
 - Simple direct Graph reads (no pagination, no retry, no ETag) may call the SDK directly from the tool without a service
 - Tools must check `get_access_token()` and raise `AuthorizationError` when `None`
+- Use `get_optional_context()` from `src.deps` instead of raw `try/except RuntimeError` around `get_context()`
 - Run tests with `uv run pytest -v`
 - Run server with `uv run uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload`
