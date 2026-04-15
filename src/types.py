@@ -58,6 +58,15 @@ class CollectionRequestBuilder(Protocol):
     the documented pattern for all Graph SDK languages.
     Docs: https://learn.microsoft.com/en-us/graph/sdks/paging
 
+    WHY A NAMED PROTOCOL CLASS IS REQUIRED:
+    `Protocol` on its own is not a usable inline type annotation — Python has no
+    syntax for anonymous structural types. You cannot write:
+        `async def paginate(rb: Protocol[request_adapter, get], ...) -> list`
+    Without this named class, the only alternatives are `BaseRequestBuilder`
+    (missing `.get()`) or `Any` (no safety) — both rejected above. The named
+    Protocol is the only way to express "any object with `request_adapter` and
+    `async get()`" as a statically checkable type.
+
     EXTENSION POINT:
     This Protocol is the right place to add additional verb support if needed.
     For example, if `paginate` ever needs to support `post()` for delta queries,
