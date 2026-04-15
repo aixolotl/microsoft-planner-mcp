@@ -30,25 +30,30 @@ Apply to:
 - Middleware registration calls
 - Any SDK pattern that is non-obvious from the code alone (e.g. fresh `HeadersCollection()`, `paginate()` over bare `.get()`)
 - Sentinel values (`"*all"`, `select=None`)
-- `ctx: Context | None = None` guards
 
 Do **not** add comments to obvious code (simple assignments, straightforward returns).
 
 ## Client Logging (`ctx`)
 
-All read tools accept an optional `ctx: Context | None = None` parameter.
-FastMCP injects `Context` automatically during dispatch based on the type hint.
-The `None` default allows tests to call the function directly without a request context.
+Use `get_context()` from `fastmcp.server.dependencies` to access the MCP context inside a tool. It raises `RuntimeError` when called outside a request (e.g. in unit tests), so guard it:
 
-Always guard ctx calls so tests pass without mocking the context:
 ```python
+from fastmcp.server.dependencies import get_access_token, get_context
+
+try:
+    ctx = get_context()
+except RuntimeError:
+    ctx = None
+
 if ctx is not None:
     await ctx.info("Fetching items...")
 ```
 
+Do **not** add `ctx: Context | None = None` to tool signatures — `get_context()` keeps the MCP parameter schema clean and avoids leaking internal plumbing to LLM clients.
+
 Use `ctx.info()` for user-visible progress on multi-step or paginated operations.
 Use `ctx.debug()` for single fast calls where intermediate state is not interesting to the user.
-Docs: https://gofastmcp.com/servers/logging
+Docs: https://gofastmcp.com/servers/context#via-get_context-function
 
 
 ## Async Patterns
