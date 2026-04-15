@@ -124,6 +124,7 @@ async def test_select_passes_none_when_all_fields(select_arg, graph_ctx):
     with graph_ctx(MODULE, graph_client):
         await list_my_plans(**select_arg)
 
+    assert len(captured) == 1
     assert captured[0].query_parameters.select is None
 
 

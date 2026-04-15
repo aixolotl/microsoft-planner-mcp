@@ -35,7 +35,11 @@ async def list_my_plans(
     if select == "*all":
         select = None  # No need to specify $select if we want all fields
 
-    select_fields = select.split(",") if select else None
+    select_fields = (
+        [field.strip() for field in select.split(",") if field.strip()]
+        if select is not None
+        else None
+    )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         service = PlannerService(graph_client)
