@@ -14,6 +14,9 @@ from ..services.planner_service import PlannerService
 plans_router = FastMCP("plans")
 
 
+# readOnlyHint=True signals to the MCP client that this tool never mutates
+# state, allowing it to skip user confirmation prompts for read operations.
+# Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @plans_router.tool(name="list_my_plans", annotations={"readOnlyHint": True})
 async def list_my_plans(
     select: str | None = "id,title,owner,details",
@@ -30,9 +33,15 @@ async def list_my_plans(
     if token is None:
         raise AuthorizationError("No access token available")
 
+    # "*all" is a sentinel that bypasses $select entirely so Graph returns
+    # every field. Passing select=None to the SDK achieves this — the SDK
+    # omits the $select query parameter from the request URL.
     if select == "*all":
-        select = None  # No need to specify $select if we want all fields
+        select = None
 
+    # The Graph SDK's $select parameter requires a list of field names, not a
+    # comma-separated string. We split here so callers can use the natural
+    # "id,title,owner" syntax without needing to know the SDK's internal shape.
     select_fields = (
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
@@ -70,6 +79,12 @@ async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
         try:
             plans = await PlannerService.paginate(graph_client.groups.by_group_id(group_id).planner.plans)
         except ODataError as exc:
+            # 403 from the groups endpoint means the user is not a member of
+            # that group (or doesn't have permission to read its plans). We
+            # convert this to a ValueError with a human-readable message so
+            # the LLM receives a clear explanation rather than a raw ODataError
+            # stack trace. All other status codes (e.g. 404, 500) are re-raised
+            # as-is so genuine failures are not silently swallowed.
             if exc.response_status_code != 403:
                 raise
             code = exc.error.code if exc.error else None

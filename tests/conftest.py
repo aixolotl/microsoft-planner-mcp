@@ -37,6 +37,14 @@ def graph_ctx():
     """Factory fixture: returns a context manager that patches get_access_token and
     graph_client_manager.for_user for the given module, yielding the supplied graph_client.
 
+    WHY THIS EXISTS:
+    Every tool calls get_access_token() and graph_client_manager.for_user() at
+    the top of its body. In production these are resolved from the FastMCP
+    request context and the Azure OBO flow. In tests we have neither, so we
+    patch both at the module level where the tool imports them. Patching at the
+    module level (not the definition site) is required because the tool already
+    holds a reference to the imported name at import time.
+
     Usage::
 
         with graph_ctx("src.tools.tasks", graph_client):
@@ -67,6 +75,14 @@ def graph_ctx():
 def token_capturing_ctx():
     """Factory fixture: patches get_access_token and graph_client_manager.for_user for the
     given module, captures every token string passed to for_user, and yields the list.
+
+    WHY THIS EXISTS:
+    graph_ctx only verifies that a Graph call succeeds; it does not assert which
+    OBO token was forwarded to GraphClientManager. token_capturing_ctx records
+    the exact token string(s) passed to for_user so tests can assert that the
+    tool correctly threads the user’s token through to the OBO exchange —
+    without this assertion it would be possible to accidentally hard-code a
+    token or forward the wrong one without any test catching it.
 
     Usage::
 

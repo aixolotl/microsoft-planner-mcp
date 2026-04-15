@@ -10,6 +10,12 @@ from msgraph.generated.models.planner_checklist_items import PlannerChecklistIte
 from msgraph.generated.models.planner_external_references import PlannerExternalReferences
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
+# Two different SDK-generated request builders share the class name
+# "TasksRequestBuilder" but live in different URL namespaces:
+#   - users/.../planner/tasks  (used by list_my_tasks — tasks assigned to me)
+#   - planner/plans/{id}/tasks (used by list_tasks — tasks within a plan)
+# Both are imported so we can build the correct $select query parameters for
+# each endpoint. The alias avoids a name collision at import time.
 from msgraph.generated.users.item.planner.tasks.tasks_request_builder import TasksRequestBuilder
 from msgraph.generated.planner.plans.item.tasks.tasks_request_builder import TasksRequestBuilder as PlanTasksRequestBuilder
 
@@ -19,6 +25,9 @@ from ..services.planner_service import PlannerService
 tasks_router = FastMCP("tasks")
 
 
+# readOnlyHint=True signals to MCP clients that this tool never mutates state,
+# allowing them to skip user confirmation prompts for read operations.
+# Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="list_my_tasks", annotations={"readOnlyHint": True})
 async def list_my_tasks(
     select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
@@ -35,9 +44,14 @@ async def list_my_tasks(
     if token is None:
         raise AuthorizationError("No access token available")
 
+    # "*all" is a sentinel that tells the tool to omit $select entirely so
+    # Graph returns every task field. Without the sentinel, callers would have
+    # to set select=None explicitly, which is less ergonomic for LLM agents.
     if select == "*all":
         select = None
 
+    # The Graph SDK's $select parameter is a list[str], not a comma-separated
+    # string. We split here so callers can use the natural "id,title" syntax.
     select_fields = (
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
@@ -57,6 +71,8 @@ async def list_my_tasks(
     return tasks or None
 
 
+# readOnlyHint=True: this tool only reads from Graph, never writes.
+# Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="list_tasks", annotations={"readOnlyHint": True})
 async def list_tasks(
     plan_id: str,
@@ -145,6 +161,11 @@ async def create_task(
             additional_data={
                 user_id: {
                     "@odata.type": "#microsoft.graph.plannerAssignment",
+                    # orderHint " !" is the Graph API sentinel meaning
+                    # "place at the top of the order". It is a magic string
+                    # defined by the Planner ordering algorithm; without it
+                    # the API rejects the assignment with a 400 BadRequest.
+                    # Docs: https://learn.microsoft.com/en-us/graph/api/resources/planner-order-hint-format
                     "orderHint": " !",
                 }
                 for user_id in assign_user_ids
@@ -155,6 +176,10 @@ async def create_task(
         try:
             return await graph_client.planner.tasks.post(body)
         except ODataError as exc:
+            # 403 from task creation usually means the user has hit the plan
+            # task limit or lacks write permission. Convert to ValueError with a
+            # readable message so the LLM gets a clear explanation. All other
+            # status codes are re-raised so genuine failures surface normally.
             if exc.response_status_code != 403:
                 raise
             code = exc.error.code if exc.error else None
@@ -162,6 +187,8 @@ async def create_task(
             raise ValueError(f"Cannot create task ({code}): {msg}") from exc
 
 
+# readOnlyHint=True: this tool reads task details without any side effects.
+# Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="get_task_details", annotations={"readOnlyHint": True})
 async def get_task_details(task_id: str) -> PlannerTaskDetails | None:
     """Get the full details for a Planner task: description, checklist items, and external references.

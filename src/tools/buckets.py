@@ -11,6 +11,9 @@ from ..services.planner_service import PlannerService
 buckets_router = FastMCP("buckets")
 
 
+# readOnlyHint=True signals to the MCP client that this tool never mutates
+# state, allowing it to skip user confirmation prompts for read operations.
+# Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @buckets_router.tool(name="list_buckets", annotations={"readOnlyHint": True})
 async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
     """List all buckets in a Planner plan.
@@ -26,6 +29,12 @@ async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
         raise AuthorizationError("No access token available")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        # PlannerService.paginate is used instead of a bare .get() because
+        # the Graph API returns paged responses (up to 100 items per page with
+        # an @odata.nextLink for subsequent pages). A direct .get() silently
+        # drops everything past the first page. paginate() follows all pages
+        # via PageIterator and returns a flat list.
+        # Docs: https://learn.microsoft.com/en-us/graph/paging
         buckets = await PlannerService.paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
 
     return buckets or None

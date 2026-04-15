@@ -56,6 +56,11 @@ class PlannerService:
         if result is None or not result.value:
             return []
         all_items: list = []
+        # PageIterator follows @odata.nextLink URLs automatically until no more
+        # pages exist. Using it instead of a manual while-loop is safer because
+        # the SDK handles auth header injection, request retry, and deseriali-
+        # sation for each subsequent page request.
+        # Docs: https://learn.microsoft.com/en-us/graph/sdks/paging
         page_iterator = PageIterator(result, request_builder.request_adapter)
         await page_iterator.iterate(lambda item: all_items.append(item) or True)
         return all_items
@@ -76,9 +81,19 @@ class PlannerService:
         HeadersCollection must be passed explicitly — RequestConfiguration uses
         a shared mutable default for `headers` that would bleed across calls.
         """
+        # A fresh HeadersCollection must be created for every config object.
+        # RequestConfiguration's default `headers` field is a class-level
+        # mutable default shared across all instances; re-using it causes
+        # If-Match values from one call to bleed into the next. This is covered
+        # by test_configs_do_not_share_headers in test_planner_service.py.
         headers = HeadersCollection()
         headers.add("If-Match", etag)
         if prefer_representation:
+            # "Prefer: return=representation" tells Graph to return the updated
+            # object in the PATCH response body instead of a 204 No Content.
+            # Without it, PATCH returns nothing and callers cannot confirm the
+            # new field values without an extra GET request.
+            # Docs: https://learn.microsoft.com/en-us/graph/api/plannertask-update
             headers.add("Prefer", "return=representation")
         return RequestConfiguration(headers=headers)
 
@@ -103,6 +118,14 @@ class PlannerService:
         try:
             return await operation(etag)
         except ODataError as exc:
+            # Graph Planner requires an If-Match header containing the current
+            # ETag of the resource. If another client has modified the resource
+            # since the caller last read it, Graph returns 412 (Precondition
+            # Failed) or 409 (Conflict). Rather than surfacing this as an error,
+            # we re-fetch the current ETag and retry once. A single retry is
+            # sufficient because concurrent modifications are rare and a second
+            # conflict is indistinguishable from a persistent server error.
+            # Docs: https://learn.microsoft.com/en-us/graph/api/plannertask-update#request-headers
             if exc.response_status_code not in (409, 412):
                 raise
             return await operation(await refresh())

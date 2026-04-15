@@ -39,24 +39,28 @@ mcp = FastMCP(
 
 # --- Middleware stack (order matters: first added = outermost = runs first on
 #     the way in and last on the way out) ---
+# Docs: https://gofastmcp.com/servers/middleware#built-in-middleware
 
 # Catches any unhandled exception from all downstream middleware and tools,
 # logs the full stack trace server-side, and converts it to a clean MCP error
 # response. Without this, an unexpected exception in a tool (e.g. a Graph SDK
 # bug or a network blip) would propagate as an unformatted 500 and may crash
 # the request context entirely.
+# Docs: https://gofastmcp.com/servers/middleware#error-handling
 mcp.add_middleware(ErrorHandlingMiddleware(include_traceback=True))
 
 # Enforces a 60 req/min ceiling per client using a sliding window. LLM agents
 # can fan out tool calls rapidly (e.g. fetching details for every task in a
 # plan). Without this, an unconstrained agent could exhaust the Microsoft Graph
 # throttling quota (10,000 req/10min per tenant), causing 429s for all users.
+# Docs: https://gofastmcp.com/servers/middleware#rate-limiting
 mcp.add_middleware(SlidingWindowRateLimitingMiddleware(max_requests=60, window_minutes=1))
 
 # Records wall-clock duration for every MCP operation and emits it to the log.
 # Useful for spotting which Graph API calls are slow (e.g. list_tasks
 # paginating a large plan). Without this there is no observability into latency
 # and slow requests are invisible until users complain.
+# Docs: https://gofastmcp.com/servers/middleware#timing
 mcp.add_middleware(TimingMiddleware())
 
 # Emits one structured JSON log line per request/response — method, status,
@@ -64,6 +68,7 @@ mcp.add_middleware(TimingMiddleware())
 # includes the duration. Without this, the only logs are the basicConfig lines
 # from uvicorn and the Python root logger, which are hard to query in Docker
 # log aggregators (Datadog, CloudWatch, etc.).
+# Docs: https://gofastmcp.com/servers/middleware#logging
 mcp.add_middleware(StructuredLoggingMiddleware())
 
 # Truncates tool responses that exceed 500 KB. Microsoft Graph list endpoints
@@ -71,6 +76,7 @@ mcp.add_middleware(StructuredLoggingMiddleware())
 # many tasks with full field sets. Without this, an oversized response can
 # overflow the LLM's context window, causing the client to error or silently
 # drop content.
+# Docs: https://gofastmcp.com/servers/middleware#response-limiting
 mcp.add_middleware(ResponseLimitingMiddleware(max_size=500_000))
 
 mcp.mount(me_router)

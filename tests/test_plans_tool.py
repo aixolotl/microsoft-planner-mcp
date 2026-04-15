@@ -13,6 +13,10 @@ from msgraph.generated.models.planner_plan import PlannerPlan
 from src.tools.plans import list_group_plans, list_my_plans
 
 MODULE = "src.tools.plans"
+# MODULE is the import path patched by graph_ctx / token_capturing_ctx.
+# It must be the module where get_access_token and graph_client_manager are
+# *used* (i.e. imported into), not where they are defined. Patching the
+# definition site would have no effect on the already-imported references.
 
 
 # ---------------------------------------------------------------------------
