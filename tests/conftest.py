@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager, contextmanager
 from unittest.mock import MagicMock, patch
 
@@ -9,6 +10,25 @@ import pytest
 
 from msgraph.generated.models.o_data_errors.main_error import MainError
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    """Set required env vars before any src module is imported.
+
+    WHY THIS EXISTS:
+    src/config.py instantiates Settings() at module level. pydantic-settings
+    validates CLIENT_ID, CLIENT_SECRET, and TENANT_ID as required fields at
+    that point. Without real env vars or a .env file the import fails during
+    collection — before any fixture or monkeypatch can intervene.
+
+    pytest_configure() is the earliest hook pytest provides; it runs before
+    collection begins, so the fake values are in os.environ when Python first
+    imports src.config. os.environ.setdefault() is used so that if a developer
+    has a real .env-exported value in their shell it takes precedence.
+    """
+    os.environ.setdefault("CLIENT_ID", "test-client-id")
+    os.environ.setdefault("CLIENT_SECRET", "test-client-secret")
+    os.environ.setdefault("TENANT_ID", "test-tenant-id")
 
 
 @pytest.fixture
