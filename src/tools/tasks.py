@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
@@ -31,6 +31,7 @@ tasks_router = FastMCP("tasks")
 @tasks_router.tool(name="list_my_tasks", annotations={"readOnlyHint": True})
 async def list_my_tasks(
     select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
+    ctx: Context | None = None,
 ) -> list[PlannerTask] | None:
     """List all Planner tasks assigned to the authenticated user across all plans.
 
@@ -43,6 +44,13 @@ async def list_my_tasks(
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
+
+    # ctx.info() forwards a real-time progress message to the MCP client.
+    # FastMCP injects ctx during dispatch; the None guard lets tests call the
+    # function directly without setting up a request context.
+    # Docs: https://gofastmcp.com/servers/logging
+    if ctx is not None:
+        await ctx.info("Fetching tasks assigned to the authenticated user")
 
     # "*all" is a sentinel that tells the tool to omit $select entirely so
     # Graph returns every task field. Without the sentinel, callers would have
@@ -68,6 +76,9 @@ async def list_my_tasks(
             ),
         )
 
+    if ctx is not None:
+        await ctx.info(f"Found {len(tasks)} task(s) assigned to you")
+
     return tasks or None
 
 
@@ -77,6 +88,7 @@ async def list_my_tasks(
 async def list_tasks(
     plan_id: str,
     select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
+    ctx: Context | None = None,
 ) -> list[PlannerTask] | None:
     """List all tasks in a Planner plan.
 
@@ -90,6 +102,9 @@ async def list_tasks(
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
+
+    if ctx is not None:
+        await ctx.info(f"Fetching tasks for plan {plan_id}")
 
     if select == "*all":
         select = None
@@ -109,6 +124,9 @@ async def list_tasks(
                 )
             ),
         )
+
+    if ctx is not None:
+        await ctx.info(f"Found {len(tasks)} task(s) in plan {plan_id}")
 
     return tasks or None
 
@@ -190,7 +208,7 @@ async def create_task(
 # readOnlyHint=True: this tool reads task details without any side effects.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="get_task_details", annotations={"readOnlyHint": True})
-async def get_task_details(task_id: str) -> PlannerTaskDetails | None:
+async def get_task_details(task_id: str, ctx: Context | None = None) -> PlannerTaskDetails | None:
     """Get the full details for a Planner task: description, checklist items, and external references.
 
     Args:
@@ -202,6 +220,9 @@ async def get_task_details(task_id: str) -> PlannerTaskDetails | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
+
+    if ctx is not None:
+        await ctx.debug(f"Fetching details for task {task_id}")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         result = await graph_client.planner.tasks.by_planner_task_id(task_id).details.get()

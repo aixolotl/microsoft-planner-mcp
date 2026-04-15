@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from msgraph.generated.models.planner_bucket import PlannerBucket
@@ -15,7 +15,7 @@ buckets_router = FastMCP("buckets")
 # state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @buckets_router.tool(name="list_buckets", annotations={"readOnlyHint": True})
-async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
+async def list_buckets(plan_id: str, ctx: Context | None = None) -> list[PlannerBucket] | None:
     """List all buckets in a Planner plan.
 
     Args:
@@ -28,6 +28,14 @@ async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
     if token is None:
         raise AuthorizationError("No access token available")
 
+    # ctx.info() is forwarded to the MCP client so progress is visible during
+    # the paginated Graph call. FastMCP injects ctx during dispatch; the None
+    # guard prevents AttributeError when the function is called directly in
+    # tests. Info level because bucket listing is a user-visible operation.
+    # Docs: https://gofastmcp.com/servers/logging
+    if ctx is not None:
+        await ctx.info(f"Fetching buckets for plan {plan_id}")
+
     async with graph_client_manager.for_user(token.token) as graph_client:
         # PlannerService.paginate is used instead of a bare .get() because
         # the Graph API returns paged responses (up to 100 items per page with
@@ -36,5 +44,8 @@ async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
         # via PageIterator and returns a flat list.
         # Docs: https://learn.microsoft.com/en-us/graph/paging
         buckets = await PlannerService.paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
+
+    if ctx is not None:
+        await ctx.info(f"Found {len(buckets)} bucket(s) in plan {plan_id}")
 
     return buckets or None

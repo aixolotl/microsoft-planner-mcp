@@ -1,0 +1,62 @@
+# Jaeger v2 all-in-one configuration — in-memory storage for local development.
+#
+# Jaeger v2 is built on the OpenTelemetry Collector framework and is configured
+# via a YAML file (unlike v1 which used environment variables). This file is
+# mounted read-only into the jaeger container in compose.yaml.
+#
+# Docs (migration from v1): https://www.jaegertracing.io/docs/latest/migration/
+# Docs (v2 configuration):  https://www.jaegertracing.io/docs/latest/configuration/
+# Docs (storage backends):  https://www.jaegertracing.io/docs/latest/deployment/#span-storage-backends
+
+service:
+  # Wire together the pipeline: OTLP receiver → in-memory store → Jaeger UI.
+  # Extensions are singletons that outlive the pipeline (storage, query UI).
+  extensions: [jaeger_storage, jaeger_query, healthcheckv2]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      exporters: [jaeger_storage_exporter]
+
+extensions:
+  # healthcheckv2 exposes GET http://localhost:13133/status — used by the Docker
+  # healthcheck in compose.yaml so the mcp service waits until Jaeger is ready.
+  # Docs: https://github.com/open-telemetry/opentelemetry-collector-contrib/tree/main/extension/healthcheckv2extension
+  healthcheckv2:
+    use_v2: true
+    http:
+      endpoint: "0.0.0.0:13133"
+
+  # In-memory trace storage. Traces are lost when the container restarts.
+  # For persistence, replace `memory` with a badger or elasticsearch backend.
+  # Docs: https://www.jaegertracing.io/docs/latest/deployment/#span-storage-backends
+  jaeger_storage:
+    backends:
+      memstore:
+        memory:
+          max_traces: 100000
+
+  # Jaeger query service — serves the UI on :16686 and the gRPC API on :16685.
+  # Docs: https://www.jaegertracing.io/docs/latest/deployment/#query-service--ui
+  jaeger_query:
+    storage:
+      traces: memstore
+    http:
+      endpoint: "0.0.0.0:16686"
+    grpc:
+      endpoint: "0.0.0.0:16685"
+
+receivers:
+  # OTLP receiver — accepts spans from the mcp service over gRPC (:4317) and
+  # HTTP (:4318). FastMCP's telemetry module uses gRPC (OTLPSpanExporter).
+  # Docs: https://opentelemetry.io/docs/specs/otel/protocol/
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+exporters:
+  # Writes received spans to the in-memory backend defined above.
+  jaeger_storage_exporter:
+    trace_storage: memstore

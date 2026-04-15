@@ -30,8 +30,19 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Then, add the rest of the project source code and install it
 # Installing separately from its dependencies allows optimal layer caching
 COPY . /app
+
+# Install core project. Pass INSTALL_OTEL=1 at build time (via compose.yaml
+# build.args) to also install the optional otel dependency group so traces
+# are exported to the OTLP backend configured by OTEL_EXPORTER_OTLP_ENDPOINT.
+# Without INSTALL_OTEL the otel packages are absent and configure() in
+# src/telemetry.py silently skips setup — no overhead, no traces.
+ARG INSTALL_OTEL=0
 RUN --mount=type=cache,target=/root/.cache/uv \
-    uv sync --locked
+    if [ "$INSTALL_OTEL" = "1" ]; then \
+        uv sync --locked --group otel; \
+    else \
+        uv sync --locked; \
+    fi
 
 # Place executables in the environment at the front of the path
 ENV PATH="/app/.venv/bin:$PATH"

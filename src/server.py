@@ -20,6 +20,13 @@ from .tools.me import me_router
 from .tools.plans import plans_router
 from .tools.tasks import tasks_router
 
+# OpenTelemetry must be configured before FastMCP is imported so the
+# TracerProvider is in place when FastMCP's instrumentation hooks initialise.
+# configure() is a safe no-op when OTEL_EXPORTER_OTLP_ENDPOINT is absent.
+# Docs: https://gofastmcp.com/servers/telemetry
+from .telemetry import configure as _configure_telemetry
+_configure_telemetry()
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(name)s %(message)s",
@@ -35,6 +42,13 @@ mcp = FastMCP(
     ),
     mask_error_details=True,
     version="1.0.0",
+    # Forward ctx.info() / ctx.debug() log messages to MCP clients at INFO
+    # level and above. Without this, tool-level ctx.info() calls are silently
+    # suppressed even though the tools emit them. Clients (Claude, MCP
+    # Inspector) display these as real-time progress messages alongside tool
+    # results.
+    # Docs: https://gofastmcp.com/servers/logging
+    client_log_level="info",
 )
 
 # --- Middleware stack (order matters: first added = outermost = runs first on

@@ -8,6 +8,49 @@ description: "Use when writing or modifying Python source code. Covers module la
 
 Every module starts with `from __future__ import annotations`.
 
+## Commenting Convention
+
+Non-obvious decisions must include an inline comment that answers three questions:
+
+1. **Why it exists** — the intent behind the choice
+2. **What breaks without it** — the failure mode if it is removed or changed
+3. **Docs link** — a URL the next developer can read for full context
+
+Format (single line for short explanations, multi-line for more complex ones):
+```python
+# <brief what/why>. Without this, <failure mode>.
+# Docs: https://...
+```
+
+Apply to:
+- Auth guards (`get_access_token() is None` checks)
+- Error-code filtering (`if exc.response_status_code != 403:`)
+- ETag retry logic
+- Magic strings (`orderHint: " !"`)
+- Middleware registration calls
+- Any SDK pattern that is non-obvious from the code alone (e.g. fresh `HeadersCollection()`, `paginate()` over bare `.get()`)
+- Sentinel values (`"*all"`, `select=None`)
+- `ctx: Context | None = None` guards
+
+Do **not** add comments to obvious code (simple assignments, straightforward returns).
+
+## Client Logging (`ctx`)
+
+All read tools accept an optional `ctx: Context | None = None` parameter.
+FastMCP injects `Context` automatically during dispatch based on the type hint.
+The `None` default allows tests to call the function directly without a request context.
+
+Always guard ctx calls so tests pass without mocking the context:
+```python
+if ctx is not None:
+    await ctx.info("Fetching items...")
+```
+
+Use `ctx.info()` for user-visible progress on multi-step or paginated operations.
+Use `ctx.debug()` for single fast calls where intermediate state is not interesting to the user.
+Docs: https://gofastmcp.com/servers/logging
+
+
 ## Async Patterns
 
 - All Graph SDK calls are async — use `async with graph_client_manager.for_user(token)` for OBO auth

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastmcp import FastMCP
+from fastmcp import FastMCP, Context
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
@@ -20,6 +20,7 @@ plans_router = FastMCP("plans")
 @plans_router.tool(name="list_my_plans", annotations={"readOnlyHint": True})
 async def list_my_plans(
     select: str | None = "id,title,owner,details",
+    ctx: Context | None = None,
 ) -> list[PlannerPlan] | None:
     """List all Planner plans accessible to the authenticated user.
 
@@ -32,6 +33,13 @@ async def list_my_plans(
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
+
+    # ctx.info() forwards a progress message to the MCP client so the LLM
+    # sees real-time status during the paginated Graph call. FastMCP injects
+    # ctx during dispatch; the None guard prevents AttributeError in tests.
+    # Docs: https://gofastmcp.com/servers/logging
+    if ctx is not None:
+        await ctx.info("Fetching Planner plans for the authenticated user")
 
     # "*all" is a sentinel that bypasses $select entirely so Graph returns
     # every field. Passing select=None to the SDK achieves this — the SDK
@@ -58,11 +66,14 @@ async def list_my_plans(
             ),
         )
 
+    if ctx is not None:
+        await ctx.info(f"Found {len(all_plans)} plan(s)")
+
     return all_plans or None
 
 
 @plans_router.tool(name="list_group_plans", annotations={"readOnlyHint": True})
-async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
+async def list_group_plans(group_id: str, ctx: Context | None = None) -> list[PlannerPlan] | None:
     """List all Planner plans belonging to a Microsoft 365 group.
 
     Args:
@@ -74,6 +85,9 @@ async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
+
+    if ctx is not None:
+        await ctx.info(f"Fetching Planner plans for group {group_id}")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
@@ -90,5 +104,8 @@ async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
             code = exc.error.code if exc.error else None
             msg = exc.error.message if exc.error else exc.primary_message
             raise ValueError(f"Access denied for group {group_id!r} ({code}): {msg}") from exc
+
+    if ctx is not None:
+        await ctx.info(f"Found {len(plans)} plan(s) in group {group_id}")
 
     return plans or None
