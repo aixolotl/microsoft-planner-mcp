@@ -29,12 +29,18 @@ async def list_my_plans(
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
-    
+
     if select == "*all":
         select = None  # No need to specify $select if we want all fields
 
+    normalized_select = (
+        [field.strip() for field in select.split(",") if field.strip()]
+        if select is not None
+        else None
+    )
+
     query_parameters = PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
-        select=select.split(",") if select else None,
+        select=normalized_select,
     )
     request_configuration = RequestConfiguration(query_parameters=query_parameters)
 
