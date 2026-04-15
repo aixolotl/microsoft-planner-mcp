@@ -102,30 +102,6 @@ async def list_things() -> list[Thing] | None:
 - Use `HeadersCollection()` explicitly — never rely on `RequestConfiguration` default headers (mutable shared state)
 - Paginated reads follow next-link until exhaustion; accumulate results into a list
 
-## Query Parameters (`src/query_parameters.py`)
-
-The Graph SDK's generated `*RequestBuilderGetQueryParameters` and `*RequestBuilderGetRequestConfiguration` classes emit `DeprecationWarning` at **import time** (the `warn()` call is in the class body). Do not import them.
-
-Instead, define a plain `@dataclass` in `src/query_parameters.py` that implements `get_query_parameter(self, original_name: str) -> str`:
-
-```python
-from __future__ import annotations
-
-from dataclasses import dataclass
-from typing import Optional
-
-@dataclass
-class MyGetQueryParameters:
-    select: Optional[list[str]] = None
-
-    def get_query_parameter(self, original_name: str) -> str:
-        if original_name == "select":
-            return "%24select"
-        return original_name
-```
-
-Pass it via `RequestConfiguration(query_parameters=MyGetQueryParameters(...))` and suppress the resulting type checker mismatch with `# type: ignore[arg-type]` on the `.get()` call site.
-
 ## Configuration
 
 - Environment variables via `pydantic_settings.BaseSettings` in `src/config.py`
