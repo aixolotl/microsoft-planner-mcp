@@ -24,8 +24,8 @@ from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
-from msgraph.generated.users.item.planner.plans.plans_request_builder import PlansRequestBuilder
 
+from ..query_parameters import PlansGetQueryParameters
 T = TypeVar("T")
 
 
@@ -83,18 +83,17 @@ class PlannerService:
 
     async def list_my_plans(self, select: list[str] | None = None) -> list[PlannerPlan]:
         """Return all plans accessible to the user, following pagination links."""
-        query_parameters = PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
-            select=select,
+        request_configuration = RequestConfiguration(
+            query_parameters=PlansGetQueryParameters(select=select)
         )
-        request_configuration = RequestConfiguration(query_parameters=query_parameters)
 
         all_plans: list[PlannerPlan] = []
-        result = await self._client.me.planner.plans.get(request_configuration=request_configuration)
+        result = await self._client.me.planner.plans.get(request_configuration=request_configuration)  # type: ignore[arg-type]
         if result and result.value:
             all_plans.extend(result.value)
         while result is not None and result.odata_next_link is not None:
             result = await self._client.me.planner.plans.with_url(result.odata_next_link).get(
-                request_configuration=request_configuration
+                request_configuration=request_configuration  # ty:ignore[invalid-argument-type]
             )
             if result and result.value:
                 all_plans.extend(result.value)
