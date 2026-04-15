@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -107,7 +106,7 @@ async def test_create_task_returns_created_task(graph_ctx):
 @pytest.mark.parametrize("due_str,expected_utc", [
     ("2026-05-31T00:00:00", datetime(2026, 5, 31, 0, 0, 0, tzinfo=timezone.utc)),
     ("2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
-])
+], ids=["naive-utc-due-date", "offset-due-date-converted-to-utc"])
 async def test_create_task_converts_due_date_to_utc(due_str, expected_utc, graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
@@ -123,7 +122,7 @@ async def test_create_task_converts_due_date_to_utc(due_str, expected_utc, graph
 @pytest.mark.parametrize("start_str,expected_utc", [
     ("2026-05-01T00:00:00", datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)),
     ("2026-05-01T06:00:00+06:00", datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)),
-])
+], ids=["naive-utc-start-date", "offset-start-date-converted-to-utc"])
 async def test_create_task_converts_start_date_to_utc(start_str, expected_utc, graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())

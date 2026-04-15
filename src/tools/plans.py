@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
@@ -104,12 +102,8 @@ async def create_task(
     if token is None:
         raise AuthorizationError("No access token available")
 
-    def _to_utc(s: str) -> datetime:
-        dt = datetime.fromisoformat(s)
-        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
-
-    start_dt = _to_utc(start_date_time) if start_date_time else None
-    due_dt = _to_utc(due_date_time) if due_date_time else None
+    start_dt = PlannerService.to_utc(start_date_time) if start_date_time else None
+    due_dt = PlannerService.to_utc(due_date_time) if due_date_time else None
     if start_dt and due_dt and start_dt > due_dt:
         raise ValueError(f"start_date_time ({start_date_time}) must not be after due_date_time ({due_date_time})")
 

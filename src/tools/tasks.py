@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
@@ -73,7 +71,7 @@ async def update_task(
         task_id: The ID of the task to update (from list_my_tasks or list_tasks).
         etag: The current @odata.etag of the task. Retries once automatically if stale (412/409).
         title: New title for the task.
-        percent_complete: Completion percentage (0, 25, 50, 75, or 100).
+        percent_complete: Completion percentage from 0 to 100.
         due_date_time: ISO 8601 due date string (e.g. "2026-05-31T00:00:00").
         bucket_id: ID of the bucket to move the task to.
         assignee_priority: Order hint string for sorting within the assignee's task list.
@@ -87,17 +85,13 @@ async def update_task(
     if token is None:
         raise AuthorizationError("No access token available")
 
-    def _to_utc(s: str) -> datetime:
-        dt = datetime.fromisoformat(s)
-        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
-
     body = PlannerTask()
     for attr, value in [
         ("title", title),
         ("percent_complete", percent_complete),
         ("bucket_id", bucket_id),
         ("assignee_priority", assignee_priority),
-        ("due_date_time", _to_utc(due_date_time) if due_date_time is not None else None),
+        ("due_date_time", PlannerService.to_utc(due_date_time) if due_date_time is not None else None),
     ]:
         if value is not None:
             setattr(body, attr, value)

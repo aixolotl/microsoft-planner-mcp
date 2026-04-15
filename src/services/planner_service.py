@@ -15,6 +15,7 @@ is raised from _refresh_task_etag.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from datetime import datetime, timezone
 from typing import Any, TypeVar
 
 from kiota_abstractions.base_request_configuration import RequestConfiguration
@@ -58,6 +59,15 @@ class PlannerService:
                 break
             result = await request_builder.with_url(result.odata_next_link).get()
         return all_items
+
+    @staticmethod
+    def to_utc(s: str) -> datetime:
+        """Parse an ISO 8601 datetime string and return it normalised to UTC.
+
+        Naive datetimes (no timezone) are assumed to be UTC.
+        """
+        dt = datetime.fromisoformat(s)
+        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
 
     @staticmethod
     def _make_config(etag: str, *, prefer_representation: bool = False) -> RequestConfiguration:

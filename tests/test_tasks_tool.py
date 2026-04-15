@@ -13,6 +13,7 @@ from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
 
+from src.services.planner_service import PlannerService
 from src.tools.tasks import (
     delete_task,
     get_task_details,
@@ -182,7 +183,7 @@ async def test_update_task_returns_updated_task(graph_ctx):
     ("percent_complete", 50, "percent_complete"),
     ("bucket_id", "bucket-abc", "bucket_id"),
     ("assignee_priority", "8585!", "assignee_priority"),
-])
+], ids=["percent-complete", "bucket-id", "assignee-priority"])
 async def test_update_task_sets_scalar_fields(field, value, attr, graph_ctx):
     svc = make_patch_svc(return_value=make_task())
 
@@ -197,11 +198,13 @@ async def test_update_task_sets_scalar_fields(field, value, attr, graph_ctx):
 @pytest.mark.parametrize("due_str,expected_utc", [
     ("2026-05-31T00:00:00", datetime(2026, 5, 31, 0, 0, 0, tzinfo=timezone.utc)),
     ("2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
-])
+], ids=["naive-datetime-assumed-utc", "offset-datetime-converted-to-utc"])
 async def test_update_task_converts_due_date_to_utc(due_str, expected_utc, graph_ctx):
     svc = make_patch_svc(return_value=make_task())
 
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
+    with graph_ctx(MODULE, MagicMock()), \
+         patch(f"{MODULE}.PlannerService", return_value=svc) as mock_svc_cls:
+        mock_svc_cls.to_utc = PlannerService.to_utc
         await update_task("task-1", '"etag-v1"', due_date_time=due_str)
 
     _, body, _ = svc.patch_task.call_args.args

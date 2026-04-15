@@ -99,7 +99,7 @@ async def test_patch_task_success():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", [412, 409])
+@pytest.mark.parametrize("status", [412, 409], ids=["precondition-failed-412", "conflict-409"])
 async def test_patch_task_retries_on_conflict(status, make_odata_error):
     fresh_task = make_task('"etag-fresh"')
     updated_task = make_task('"etag-v3"')
@@ -139,7 +139,7 @@ async def test_patch_task_retry_uses_fresh_etag(make_odata_error):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "MaximumTasksInProject")])
+@pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "MaximumTasksInProject")], ids=["bad-request-400", "maximum-tasks-in-project-403"])
 async def test_patch_task_non_retryable_raises(status, code, make_odata_error):
     client = make_graph_client(patch_side_effect=make_odata_error(status, code))
 
@@ -209,7 +209,7 @@ async def test_patch_task_details_success():
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status", [412, 409])
+@pytest.mark.parametrize("status", [412, 409], ids=["precondition-failed-412", "conflict-409"])
 async def test_patch_task_details_retries_on_conflict(status, make_odata_error):
     fresh = make_details('"details-etag-fresh"')
     updated = make_details('"details-etag-v3"')
@@ -250,7 +250,7 @@ async def test_patch_task_details_retry_uses_fresh_etag(make_odata_error):
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "Forbidden")])
+@pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "Forbidden")], ids=["bad-request-400", "forbidden-403"])
 async def test_patch_task_details_non_retryable_raises(status, code, make_odata_error):
     client = make_graph_client(details_patch_side_effect=make_odata_error(status, code))
 
