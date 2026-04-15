@@ -16,8 +16,9 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import Any, TypeVar
+from typing import TypeVar
 
+from kiota_abstractions.base_request_builder import BaseRequestBuilder
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from kiota_abstractions.headers_collection import HeadersCollection
 from msgraph import GraphServiceClient
@@ -39,7 +40,7 @@ class PlannerService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def paginate(request_builder: Any, request_configuration: Any = None) -> list:
+    async def paginate(request_builder: BaseRequestBuilder, request_configuration: RequestConfiguration | None = None) -> list:
         """Fetch all pages from a Graph collection endpoint, following @odata.nextLink.
 
         Args:

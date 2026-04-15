@@ -9,7 +9,6 @@ from starlette.responses import JSONResponse, RedirectResponse
 from .auth_provider import auth
 from .config import settings
 from .tools.buckets import buckets_router
-from .tools.group_plans import group_plans_router
 from .tools.me import me_router
 from .tools.plans import plans_router
 from .tools.tasks import tasks_router
@@ -34,7 +33,6 @@ mcp.mount(me_router)
 mcp.mount(plans_router)
 mcp.mount(tasks_router)
 mcp.mount(buckets_router)
-mcp.mount(group_plans_router)
 
 
 @mcp.custom_route("/health", methods=["GET"])
