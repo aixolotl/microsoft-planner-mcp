@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     CLIENT_SECRET: str
     TENANT_ID: str
     BASE_URL: str = "http://localhost:8000"
-    CORS_ORIGINS: list[str] = ["*"]
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:8000"]
 
 
 settings = Settings()  # ty:ignore[missing-argument]
