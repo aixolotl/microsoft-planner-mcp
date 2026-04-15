@@ -22,6 +22,7 @@ from kiota_abstractions.headers_collection import HeadersCollection
 from msgraph import GraphServiceClient
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
+from msgraph.generated.models.planner_task_details import PlannerTaskDetails
 
 T = TypeVar("T")
 
@@ -57,6 +58,14 @@ class PlannerService:
             raise ValueError(f"No @odata.etag found on task {task_id!r}")
         return etag
 
+    async def _refresh_details_etag(self, task_id: str) -> str:
+        """GET the task details and return the current @odata.etag value."""
+        details = await self._client.planner.tasks.by_planner_task_id(task_id).details.get()
+        etag: str | None = details.additional_data.get("@odata.etag") if details else None
+        if not etag:
+            raise ValueError(f"No @odata.etag found on task details {task_id!r}")
+        return etag
+
     async def _with_retry(self, task_id: str, etag: str, operation: Callable[[str], Awaitable[T]]) -> T:
         """Run ``operation(etag)``, retrying once with a fresh ETag on 412/409."""
         try:
@@ -90,3 +99,19 @@ class PlannerService:
             task_id, etag,
             lambda e: item.delete(request_configuration=self._make_config(e)),
         )
+
+    async def patch_task_details(
+        self,
+        task_id: str,
+        body: PlannerTaskDetails,
+        etag: str,
+    ) -> PlannerTaskDetails | None:
+        """PATCH task details.  Retries once with a fresh ETag on 412/409."""
+        item = self._client.planner.tasks.by_planner_task_id(task_id).details
+        try:
+            return await item.patch(body, request_configuration=self._make_config(etag, prefer_representation=True))
+        except ODataError as exc:
+            if exc.response_status_code not in (409, 412):
+                raise
+            fresh_etag = await self._refresh_details_etag(task_id)
+            return await item.patch(body, request_configuration=self._make_config(fresh_etag, prefer_representation=True))
