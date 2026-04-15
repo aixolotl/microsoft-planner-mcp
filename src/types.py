@@ -34,8 +34,11 @@ class CollectionRequestBuilder(Protocol):
          BaseRequestBuilder, object].
 
     3. `Protocol(BaseRequestBuilder)` — Protocol inheriting the non-Protocol class
-       → Rejected: Python raises `TypeError: Protocol class cannot inherit from
-         non-protocol class` at class definition time.
+       → Rejected: behavior is version-dependent. Python 3.12+ raises `TypeError`
+         at class definition time; earlier versions (3.8–3.11) may not raise
+         immediately but the resulting class loses structural subtyping guarantees
+         — mypy and pyright both reject it regardless. The conclusion is the same
+         across all versions: it does not work.
 
     4. Type as `Any`
        → Rejected: silences errors but abandons all type safety.
@@ -54,6 +57,11 @@ class CollectionRequestBuilder(Protocol):
     builder and fetches lazily. Calling `.get()` on the concrete builder first is
     the documented pattern for all Graph SDK languages.
     Docs: https://learn.microsoft.com/en-us/graph/sdks/paging
+
+    EXTENSION POINT:
+    This Protocol is the right place to add additional verb support if needed.
+    For example, if `paginate` ever needs to support `post()` for delta queries,
+    add `async def post(...)` here rather than widening the type elsewhere.
 
     WHAT `BaseRequestBuilder` IS FOR (context):
     It is kiota's internal base for code-generated clients. It stores routing state
