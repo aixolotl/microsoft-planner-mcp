@@ -9,22 +9,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastmcp.exceptions import AuthorizationError
-from msgraph.generated.models.o_data_errors.main_error import MainError
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
 
 from src.tools.plans import create_task, list_tasks
 
+MODULE = "src.tools.plans"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def make_access_token(token_str: str = "test-obo-token") -> MagicMock:
-    token = MagicMock()
-    token.token = token_str
-    return token
 
 
 def make_task(task_id: str = "task-1", title: str = "My Task") -> PlannerTask:
@@ -34,17 +29,10 @@ def make_task(task_id: str = "task-1", title: str = "My Task") -> PlannerTask:
     return task
 
 
-def make_tasks_result(tasks: list[PlannerTask] | None) -> MagicMock:
+def make_tasks_result(tasks) -> MagicMock:
     result = MagicMock()
     result.value = tasks
     return result
-
-
-def make_odata_error(status: int, code: str = "SomeCode", message: str = "msg") -> ODataError:
-    err = ODataError()
-    err.response_status_code = status
-    err.error = MainError(code=code, message=message)
-    return err
 
 
 # ---------------------------------------------------------------------------
@@ -54,26 +42,20 @@ def make_odata_error(status: int, code: str = "SomeCode", message: str = "msg") 
 
 @pytest.mark.asyncio
 async def test_list_tasks_no_token_raises():
-    with patch("src.tools.plans.get_access_token", return_value=None):
+    with patch(f"{MODULE}.get_access_token", return_value=None):
         with pytest.raises(AuthorizationError):
             await list_tasks("plan-1")
 
 
 @pytest.mark.asyncio
-async def test_list_tasks_returns_tasks():
+async def test_list_tasks_returns_tasks(graph_ctx):
     tasks = [make_task("t1"), make_task("t2")]
     graph_client = MagicMock()
     graph_client.planner.plans.by_planner_plan_id.return_value.tasks.get = AsyncMock(
         return_value=make_tasks_result(tasks)
     )
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         result = await list_tasks("plan-1")
 
     assert result == tasks
@@ -82,17 +64,11 @@ async def test_list_tasks_returns_tasks():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("get_return", [None, make_tasks_result(None)], ids=["result-none", "value-none"])
-async def test_list_tasks_returns_none_when_empty(get_return):
+async def test_list_tasks_returns_none_when_empty(get_return, graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.plans.by_planner_plan_id.return_value.tasks.get = AsyncMock(return_value=get_return)
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         result = await list_tasks("plan-1")
 
     assert result is None
@@ -105,24 +81,18 @@ async def test_list_tasks_returns_none_when_empty(get_return):
 
 @pytest.mark.asyncio
 async def test_create_task_no_token_raises():
-    with patch("src.tools.plans.get_access_token", return_value=None):
+    with patch(f"{MODULE}.get_access_token", return_value=None):
         with pytest.raises(AuthorizationError):
             await create_task("plan-1", "bucket-1", "My Task")
 
 
 @pytest.mark.asyncio
-async def test_create_task_returns_created_task():
+async def test_create_task_returns_created_task(graph_ctx):
     created = make_task("new-task", "My Task")
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=created)
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         result = await create_task("plan-1", "bucket-1", "My Task")
 
     assert result is created
@@ -137,17 +107,11 @@ async def test_create_task_returns_created_task():
     ("2026-05-31T00:00:00", datetime(2026, 5, 31, 0, 0, 0, tzinfo=timezone.utc)),
     ("2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
 ])
-async def test_create_task_converts_due_date_to_utc(due_str, expected_utc):
+async def test_create_task_converts_due_date_to_utc(due_str, expected_utc, graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         await create_task("plan-1", "bucket-1", "Task", due_date_time=due_str)
 
     body = graph_client.planner.tasks.post.call_args.args[0]
@@ -159,17 +123,11 @@ async def test_create_task_converts_due_date_to_utc(due_str, expected_utc):
     ("2026-05-01T00:00:00", datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)),
     ("2026-05-01T06:00:00+06:00", datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)),
 ])
-async def test_create_task_converts_start_date_to_utc(start_str, expected_utc):
+async def test_create_task_converts_start_date_to_utc(start_str, expected_utc, graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         await create_task("plan-1", "bucket-1", "Task", start_date_time=start_str)
 
     body = graph_client.planner.tasks.post.call_args.args[0]
@@ -177,9 +135,8 @@ async def test_create_task_converts_start_date_to_utc(start_str, expected_utc):
 
 
 @pytest.mark.asyncio
-async def test_create_task_raises_when_start_after_due():
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager"):
+async def test_create_task_raises_when_start_after_due(graph_ctx):
+    with graph_ctx(MODULE, MagicMock()):
         with pytest.raises(ValueError, match="must not be after"):
             await create_task(
                 "plan-1", "bucket-1", "Task",
@@ -189,17 +146,11 @@ async def test_create_task_raises_when_start_after_due():
 
 
 @pytest.mark.asyncio
-async def test_create_task_assigns_users():
+async def test_create_task_assigns_users(graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         await create_task("plan-1", "bucket-1", "Task", assign_user_ids=["user-a", "user-b"])
 
     body = graph_client.planner.tasks.post.call_args.args[0]
@@ -214,17 +165,11 @@ async def test_create_task_assigns_users():
 
 
 @pytest.mark.asyncio
-async def test_create_task_sets_optional_fields():
+async def test_create_task_sets_optional_fields(graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         await create_task("plan-1", "bucket-1", "Task", percent_complete=50)
 
     body = graph_client.planner.tasks.post.call_args.args[0]
@@ -232,33 +177,21 @@ async def test_create_task_sets_optional_fields():
 
 
 @pytest.mark.asyncio
-async def test_create_task_403_raises_value_error():
+async def test_create_task_403_raises_value_error(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(side_effect=make_odata_error(403, "MaximumTasksInProject"))
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         with pytest.raises(ValueError, match="MaximumTasksInProject"):
             await create_task("plan-1", "bucket-1", "Task")
 
 
 @pytest.mark.asyncio
-async def test_create_task_non_403_odata_error_reraises():
+async def test_create_task_non_403_odata_error_reraises(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(side_effect=make_odata_error(400, "BadRequest"))
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         with pytest.raises(ODataError) as exc_info:
             await create_task("plan-1", "bucket-1", "Task")
 

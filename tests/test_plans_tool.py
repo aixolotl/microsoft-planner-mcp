@@ -12,16 +12,12 @@ from msgraph.generated.models.planner_plan import PlannerPlan
 
 from src.tools.plans import list_my_plans
 
+MODULE = "src.tools.plans"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def make_access_token(token_str: str = "test-obo-token") -> MagicMock:
-    token = MagicMock()
-    token.token = token_str
-    return token
 
 
 def make_plan(plan_id: str = "plan-1", title: str = "My Plan") -> PlannerPlan:
@@ -31,13 +27,13 @@ def make_plan(plan_id: str = "plan-1", title: str = "My Plan") -> PlannerPlan:
     return plan
 
 
-def make_plans_result(plans: list[PlannerPlan] | None) -> MagicMock:
+def make_plans_result(plans) -> MagicMock:
     result = MagicMock()
     result.value = plans
     return result
 
 
-def make_graph_client(plans: list[PlannerPlan] | None = None) -> MagicMock:
+def make_graph_client(plans=None) -> MagicMock:
     client = MagicMock()
     client.me.planner.plans.get = AsyncMock(return_value=make_plans_result(plans))
     return client
@@ -63,7 +59,7 @@ def make_capturing_client() -> tuple[MagicMock, list]:
 
 @pytest.mark.asyncio
 async def test_no_token_raises_authorization_error():
-    with patch("src.tools.plans.get_access_token", return_value=None):
+    with patch(f"{MODULE}.get_access_token", return_value=None):
         with pytest.raises(AuthorizationError):
             await list_my_plans()
 
@@ -74,17 +70,10 @@ async def test_no_token_raises_authorization_error():
 
 
 @pytest.mark.asyncio
-async def test_returns_plan_list():
+async def test_returns_plan_list(graph_ctx):
     plans = [make_plan("plan-1"), make_plan("plan-2")]
-    graph_client = make_graph_client(plans)
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, make_graph_client(plans)):
         result = await list_my_plans()
 
     assert result == plans
@@ -92,17 +81,11 @@ async def test_returns_plan_list():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("get_return", [None, make_plans_result(None)], ids=["result-none", "value-none"])
-async def test_returns_none_when_no_plans(get_return):
+async def test_returns_none_when_no_plans(get_return, graph_ctx):
     graph_client = MagicMock()
     graph_client.me.planner.plans.get = AsyncMock(return_value=get_return)
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         result = await list_my_plans()
 
     assert result is None
@@ -119,16 +102,10 @@ async def test_returns_none_when_no_plans(get_return):
     ({"select": "id,title"}, ["id", "title"]),
     ({}, ["id", "title", "owner", "details"]),  # default
 ], ids=["explicit-csv", "custom-csv", "default"])
-async def test_select_is_split_into_list(select_arg, expected):
+async def test_select_is_split_into_list(select_arg, expected, graph_ctx):
     graph_client, captured = make_capturing_client()
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         await list_my_plans(**select_arg)
 
     assert len(captured) == 1
@@ -140,23 +117,17 @@ async def test_select_is_split_into_list(select_arg, expected):
     {"select": "*all"},
     {"select": None},
 ], ids=["star-all", "explicit-none"])
-async def test_select_passes_none_when_all_fields(select_arg):
+async def test_select_passes_none_when_all_fields(select_arg, graph_ctx):
     graph_client, captured = make_capturing_client()
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         await list_my_plans(**select_arg)
 
     assert captured[0].query_parameters.select is None
 
 
 @pytest.mark.asyncio
-async def test_obo_token_is_forwarded_to_for_user():
+async def test_obo_token_is_forwarded_to_for_user(make_access_token):
     received_tokens: list[str] = []
 
     @asynccontextmanager
@@ -164,8 +135,8 @@ async def test_obo_token_is_forwarded_to_for_user():
         received_tokens.append(token)
         yield make_graph_client([])
 
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token("my-secret-obo")), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
+    with patch(f"{MODULE}.get_access_token", return_value=make_access_token("my-secret-obo")), \
+         patch(f"{MODULE}.graph_client_manager") as mock_mgr:
         mock_mgr.for_user = _for_user
         await list_my_plans()
 

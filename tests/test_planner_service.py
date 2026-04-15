@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from msgraph.generated.models.o_data_errors.main_error import MainError
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
@@ -17,17 +16,6 @@ from src.services.planner_service import PlannerService
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def make_odata_error(
-    status: int,
-    code: str = "SomeCode",
-    message: str = "Some message",
-) -> ODataError:
-    err = ODataError()
-    err.response_status_code = status
-    err.error = MainError(code=code, message=message)
-    return err
 
 
 def make_task(etag: str = '"etag-v1"') -> PlannerTask:
@@ -112,7 +100,7 @@ async def test_patch_task_success():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [412, 409])
-async def test_patch_task_retries_on_conflict(status):
+async def test_patch_task_retries_on_conflict(status, make_odata_error):
     fresh_task = make_task('"etag-fresh"')
     updated_task = make_task('"etag-v3"')
     client = make_graph_client(
@@ -128,7 +116,7 @@ async def test_patch_task_retries_on_conflict(status):
 
 
 @pytest.mark.asyncio
-async def test_patch_task_retry_uses_fresh_etag():
+async def test_patch_task_retry_uses_fresh_etag(make_odata_error):
     """Retry must send the refreshed ETag, not the original stale one."""
     captured: list = []
 
@@ -152,7 +140,7 @@ async def test_patch_task_retry_uses_fresh_etag():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "MaximumTasksInProject")])
-async def test_patch_task_non_retryable_raises(status, code):
+async def test_patch_task_non_retryable_raises(status, code, make_odata_error):
     client = make_graph_client(patch_side_effect=make_odata_error(status, code))
 
     with pytest.raises(ODataError) as exc_info:
@@ -178,7 +166,7 @@ async def test_delete_task_success():
 
 
 @pytest.mark.asyncio
-async def test_delete_task_retries_on_412():
+async def test_delete_task_retries_on_412(make_odata_error):
     """Confirms delete_task is wired through _with_retry; 412/409 branch proven by patch tests."""
     client = make_graph_client(
         delete_side_effect=[make_odata_error(412), None],
@@ -192,7 +180,7 @@ async def test_delete_task_retries_on_412():
 
 
 @pytest.mark.asyncio
-async def test_delete_task_non_retryable_raises():
+async def test_delete_task_non_retryable_raises(make_odata_error):
     client = make_graph_client(delete_side_effect=make_odata_error(403, "MaximumTasksInProject", "Over limit"))
 
     with pytest.raises(ODataError) as exc_info:
@@ -222,7 +210,7 @@ async def test_patch_task_details_success():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status", [412, 409])
-async def test_patch_task_details_retries_on_conflict(status):
+async def test_patch_task_details_retries_on_conflict(status, make_odata_error):
     fresh = make_details('"details-etag-fresh"')
     updated = make_details('"details-etag-v3"')
     client = make_graph_client(
@@ -238,7 +226,7 @@ async def test_patch_task_details_retries_on_conflict(status):
 
 
 @pytest.mark.asyncio
-async def test_patch_task_details_retry_uses_fresh_etag():
+async def test_patch_task_details_retry_uses_fresh_etag(make_odata_error):
     captured: list = []
 
     async def capturing_patch(body, request_configuration=None):
@@ -263,11 +251,12 @@ async def test_patch_task_details_retry_uses_fresh_etag():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "Forbidden")])
-async def test_patch_task_details_non_retryable_raises(status, code):
+async def test_patch_task_details_non_retryable_raises(status, code, make_odata_error):
     client = make_graph_client(details_patch_side_effect=make_odata_error(status, code))
 
     with pytest.raises(ODataError) as exc_info:
         await PlannerService(client).patch_task_details("task-1", PlannerTaskDetails(), '"details-etag-v1"')
 
     assert exc_info.value.response_status_code == status
+    assert exc_info.value.error is not None
     assert exc_info.value.error.code == code

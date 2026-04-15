@@ -8,22 +8,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastmcp.exceptions import AuthorizationError
-from msgraph.generated.models.o_data_errors.main_error import MainError
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
 
 from src.tools.group_plans import list_group_plans
 
+MODULE = "src.tools.group_plans"
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def make_access_token(token_str: str = "test-obo-token") -> MagicMock:
-    token = MagicMock()
-    token.token = token_str
-    return token
 
 
 def make_plan(plan_id: str = "plan-1", title: str = "Group Plan") -> PlannerPlan:
@@ -33,17 +28,10 @@ def make_plan(plan_id: str = "plan-1", title: str = "Group Plan") -> PlannerPlan
     return plan
 
 
-def make_plans_result(plans: list[PlannerPlan] | None) -> MagicMock:
+def make_plans_result(plans) -> MagicMock:
     result = MagicMock()
     result.value = plans
     return result
-
-
-def make_odata_error(status: int, code: str = "SomeCode", message: str = "msg") -> ODataError:
-    err = ODataError()
-    err.response_status_code = status
-    err.error = MainError(code=code, message=message)
-    return err
 
 
 # ---------------------------------------------------------------------------
@@ -53,26 +41,20 @@ def make_odata_error(status: int, code: str = "SomeCode", message: str = "msg") 
 
 @pytest.mark.asyncio
 async def test_list_group_plans_no_token_raises():
-    with patch("src.tools.group_plans.get_access_token", return_value=None):
+    with patch(f"{MODULE}.get_access_token", return_value=None):
         with pytest.raises(AuthorizationError):
             await list_group_plans("group-1")
 
 
 @pytest.mark.asyncio
-async def test_list_group_plans_returns_plans():
+async def test_list_group_plans_returns_plans(graph_ctx):
     plans = [make_plan("p1"), make_plan("p2")]
     graph_client = MagicMock()
     graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
         return_value=make_plans_result(plans)
     )
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.group_plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.group_plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         result = await list_group_plans("group-1")
 
     assert result == plans
@@ -81,72 +63,48 @@ async def test_list_group_plans_returns_plans():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("get_return", [None, make_plans_result(None)], ids=["result-none", "value-none"])
-async def test_list_group_plans_returns_none_when_empty(get_return):
+async def test_list_group_plans_returns_none_when_empty(get_return, graph_ctx):
     graph_client = MagicMock()
     graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(return_value=get_return)
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.group_plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.group_plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         result = await list_group_plans("group-1")
 
     assert result is None
 
 
 @pytest.mark.asyncio
-async def test_list_group_plans_403_raises_value_error():
+async def test_list_group_plans_403_raises_value_error(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
         side_effect=make_odata_error(403, "AuthorizationRequestDenied", "Access denied")
     )
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.group_plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.group_plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         with pytest.raises(ValueError, match="Access denied for group 'group-1'"):
             await list_group_plans("group-1")
 
 
 @pytest.mark.asyncio
-async def test_list_group_plans_403_error_message_includes_code():
+async def test_list_group_plans_403_error_message_includes_code(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
         side_effect=make_odata_error(403, "AuthorizationRequestDenied", "Insufficient privileges")
     )
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.group_plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.group_plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         with pytest.raises(ValueError, match="AuthorizationRequestDenied"):
             await list_group_plans("group-1")
 
 
 @pytest.mark.asyncio
-async def test_list_group_plans_non_403_odata_error_reraises():
+async def test_list_group_plans_non_403_odata_error_reraises(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
         side_effect=make_odata_error(404, "ResourceNotFound")
     )
 
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.group_plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.group_plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with graph_ctx(MODULE, graph_client):
         with pytest.raises(ODataError) as exc_info:
             await list_group_plans("group-1")
 
@@ -154,7 +112,7 @@ async def test_list_group_plans_non_403_odata_error_reraises():
 
 
 @pytest.mark.asyncio
-async def test_list_group_plans_forwards_obo_token():
+async def test_list_group_plans_forwards_obo_token(make_access_token):
     received: list[str] = []
 
     @asynccontextmanager
@@ -166,8 +124,8 @@ async def test_list_group_plans_forwards_obo_token():
         )
         yield graph_client
 
-    with patch("src.tools.group_plans.get_access_token", return_value=make_access_token("my-obo")), \
-         patch("src.tools.group_plans.graph_client_manager") as mock_mgr:
+    with patch(f"{MODULE}.get_access_token", return_value=make_access_token("my-obo")), \
+         patch(f"{MODULE}.graph_client_manager") as mock_mgr:
         mock_mgr.for_user = _for_user
         await list_group_plans("group-1")
 
