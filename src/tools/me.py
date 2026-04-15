@@ -7,7 +7,7 @@ from ..graph_client_manager import graph_client_manager
 
 me_router = FastMCP("me")
 
-@me_router.tool(annotations={"readOnlyHint": True})
+@me_router.tool(name="get_me", annotations={"readOnlyHint": True})
 async def get_me() -> User | None:
     """Return the authenticated user's identity, verified via Microsoft Graph."""
     token = get_access_token()
