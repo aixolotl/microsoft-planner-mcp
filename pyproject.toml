@@ -22,3 +22,9 @@ testpaths = ["tests"]
 asyncio_mode = "strict"
 addopts = ["--import-mode=importlib"]
 pythonpath = ["."]
+filterwarnings = [
+    # kiota-abstractions fires warn() in the GetQueryParameters class body (SDK bug)
+    "ignore::DeprecationWarning:kiota_abstractions",
+    # msgraph-sdk generated request-configuration subclasses fire warn() in class bodies (SDK bug)
+    "ignore::DeprecationWarning:msgraph",
+]
