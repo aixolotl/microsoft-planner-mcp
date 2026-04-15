@@ -10,9 +10,9 @@ from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_assignments import PlannerAssignments
 from msgraph.generated.models.planner_plan import PlannerPlan
 from msgraph.generated.models.planner_task import PlannerTask
-from msgraph.generated.users.item.planner.plans.plans_request_builder import PlansRequestBuilder
 
 from ..graph_client_manager import graph_client_manager
+from ..services.planner_service import PlannerService
 
 plans_router = FastMCP("plans")
 
@@ -36,15 +36,13 @@ async def list_my_plans(
     if select == "*all":
         select = None  # No need to specify $select if we want all fields
 
-    query_parameters = PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
-        select=select.split(",") if select else None,
-    )
-    request_configuration = RequestConfiguration(query_parameters=query_parameters)
+    select_fields = select.split(",") if select else None
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        result = await graph_client.me.planner.plans.get(request_configuration=request_configuration)
+        service = PlannerService(graph_client)
+        all_plans = await service.list_my_plans(select=select_fields)
 
-    return result.value if result else None
+    return all_plans or None
 
 
 @plans_router.tool(name="list_tasks", annotations={"readOnlyHint": True})
