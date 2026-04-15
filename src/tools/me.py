@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from fastmcp import FastMCP, Context
+from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
-from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.dependencies import get_access_token, get_context
 from msgraph.generated.models.user import User
 
 from ..graph_client_manager import graph_client_manager
@@ -14,7 +14,7 @@ me_router = FastMCP("me")
 # prompts. Without it, clients treat the tool as potentially destructive.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @me_router.tool(name="get_me", annotations={"readOnlyHint": True})
-async def get_me(ctx: Context | None = None) -> User | None:
+async def get_me() -> User | None:
     """Return the authenticated user's profile from Microsoft Graph.
 
     Returns:
@@ -30,11 +30,15 @@ async def get_me(ctx: Context | None = None) -> User | None:
     if token is None:
         raise AuthorizationError("No access token available")
 
-    # ctx.debug() sends a message through the MCP protocol to the client so
-    # the LLM or IDE sees real-time progress. FastMCP injects ctx during
-    # dispatch; it is None when called directly in tests, so the guard is
-    # required. Debug level is appropriate here — single fast Graph call.
-    # Docs: https://gofastmcp.com/servers/logging
+    # get_context() retrieves the active MCP context inside a FastMCP request.
+    # It raises RuntimeError when called outside a request (e.g. unit tests);
+    # ctx = None in that case so logging is safely skipped.
+    # Docs: https://gofastmcp.com/servers/context#via-get_context-function
+    try:
+        ctx = get_context()
+    except RuntimeError:
+        ctx = None
+
     if ctx is not None:
         await ctx.debug("Fetching authenticated user profile from Microsoft Graph")
 

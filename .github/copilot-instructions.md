@@ -20,7 +20,6 @@ MCP server for Microsoft Planner built with FastMCP and Microsoft Graph SDK. Aut
   - `src/config.py` — `Settings` via `pydantic_settings.BaseSettings`
   - `src/auth_provider.py` — Azure OAuth provider
   - `src/graph_client_manager.py` — singleton `GraphClientManager` with per-user OBO clients
-  - `src/query_parameters.py` — custom kiota query parameter dataclasses (avoids deprecated SDK classes)
   - `src/services/` — business logic wrapping Graph SDK calls
   - `src/tools/` — FastMCP tool routers (one router per domain, mounted in `server.py`)
 - `tests/` — unit tests mirroring `src/` structure
@@ -33,6 +32,5 @@ MCP server for Microsoft Planner built with FastMCP and Microsoft Graph SDK. Aut
 - Tools that require business logic instantiate the relevant service inside the `async with` block: `service = PlannerService(graph_client)`
 - Simple direct Graph reads (no pagination, no retry, no ETag) may call the SDK directly from the tool without a service
 - Tools must check `get_access_token()` and raise `AuthorizationError` when `None`
-- Custom query parameter dataclasses belong in `src/query_parameters.py` — do not import deprecated SDK `*RequestBuilderGetQueryParameters` or `*RequestBuilderGetRequestConfiguration` classes, which emit `DeprecationWarning` at import time
 - Run tests with `uv run pytest -v`
 - Run server with `uv run uvicorn src.server:app --host 0.0.0.0 --port 8000 --reload`

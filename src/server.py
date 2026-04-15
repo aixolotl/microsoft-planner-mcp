@@ -1,4 +1,12 @@
 from __future__ import annotations
+# ruff: noqa: E402
+
+# OpenTelemetry must be configured before FastMCP is imported so the
+# TracerProvider is in place when FastMCP's instrumentation hooks initialise.
+# configure() is a safe no-op when OTEL_EXPORTER_OTLP_ENDPOINT is absent.
+# Docs: https://gofastmcp.com/servers/telemetry
+from .telemetry import configure as _configure_telemetry
+_configure_telemetry()
 
 import logging
 
@@ -19,13 +27,6 @@ from .tools.buckets import buckets_router
 from .tools.me import me_router
 from .tools.plans import plans_router
 from .tools.tasks import tasks_router
-
-# OpenTelemetry must be configured before FastMCP is imported so the
-# TracerProvider is in place when FastMCP's instrumentation hooks initialise.
-# configure() is a safe no-op when OTEL_EXPORTER_OTLP_ENDPOINT is absent.
-# Docs: https://gofastmcp.com/servers/telemetry
-from .telemetry import configure as _configure_telemetry
-_configure_telemetry()
 
 logging.basicConfig(
     level=logging.INFO,

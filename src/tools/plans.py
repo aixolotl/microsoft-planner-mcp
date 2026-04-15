@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from fastmcp import FastMCP, Context
+from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
-from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.dependencies import get_access_token, get_context
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
@@ -20,7 +20,6 @@ plans_router = FastMCP("plans")
 @plans_router.tool(name="list_my_plans", annotations={"readOnlyHint": True})
 async def list_my_plans(
     select: str | None = "id,title,owner,details",
-    ctx: Context | None = None,
 ) -> list[PlannerPlan] | None:
     """List all Planner plans accessible to the authenticated user.
 
@@ -34,10 +33,15 @@ async def list_my_plans(
     if token is None:
         raise AuthorizationError("No access token available")
 
-    # ctx.info() forwards a progress message to the MCP client so the LLM
-    # sees real-time status during the paginated Graph call. FastMCP injects
-    # ctx during dispatch; the None guard prevents AttributeError in tests.
-    # Docs: https://gofastmcp.com/servers/logging
+    # get_context() retrieves the active MCP context inside a FastMCP request.
+    # It raises RuntimeError when called outside a request (e.g. unit tests);
+    # ctx = None in that case so logging is safely skipped.
+    # Docs: https://gofastmcp.com/servers/context#via-get_context-function
+    try:
+        ctx = get_context()
+    except RuntimeError:
+        ctx = None
+
     if ctx is not None:
         await ctx.info("Fetching Planner plans for the authenticated user")
 
@@ -73,7 +77,7 @@ async def list_my_plans(
 
 
 @plans_router.tool(name="list_group_plans", annotations={"readOnlyHint": True})
-async def list_group_plans(group_id: str, ctx: Context | None = None) -> list[PlannerPlan] | None:
+async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
     """List all Planner plans belonging to a Microsoft 365 group.
 
     Args:
@@ -85,6 +89,11 @@ async def list_group_plans(group_id: str, ctx: Context | None = None) -> list[Pl
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
+
+    try:
+        ctx = get_context()
+    except RuntimeError:
+        ctx = None
 
     if ctx is not None:
         await ctx.info(f"Fetching Planner plans for group {group_id}")

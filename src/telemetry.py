@@ -1,6 +1,5 @@
 from __future__ import annotations
-import logging
-import os
+# ruff: noqa: E402
 
 """Optional OpenTelemetry SDK initialisation.
 
@@ -20,6 +19,9 @@ IMPORTANT: configure() must be called before any FastMCP symbols are used
 the active TracerProvider at startup; calling set_tracer_provider() after
 that has no effect.
 """
+
+import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +49,10 @@ def configure() -> None:
         # when the otel group is not installed, so the server still starts
         # without OTEL configured.
         from opentelemetry import trace  # noqa: PLC0415
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # noqa: PLC0415
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # noqa: PLC0415  # ty:ignore[unresolved-import]
             OTLPSpanExporter,
         )
+        from opentelemetry.sdk.resources import Resource
         from opentelemetry.sdk.trace import TracerProvider  # noqa: PLC0415
         from opentelemetry.sdk.trace.export import BatchSpanProcessor  # noqa: PLC0415
     except ImportError:
@@ -65,7 +68,9 @@ def configure() -> None:
         return
 
     service_name = os.getenv("OTEL_SERVICE_NAME", "microsoft-planner-mcp")
-    provider = TracerProvider()
+    provider = TracerProvider(
+        resource=Resource.create({"service.name": service_name})
+    )
     provider.add_span_processor(
         # BatchSpanProcessor buffers spans and exports asynchronously. Without
         # it (e.g. using SimpleSpanProcessor), every span export would add

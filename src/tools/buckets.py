@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from fastmcp import FastMCP, Context
+from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
-from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.dependencies import get_access_token, get_context
 from msgraph.generated.models.planner_bucket import PlannerBucket
 
 from ..graph_client_manager import graph_client_manager
@@ -15,7 +15,7 @@ buckets_router = FastMCP("buckets")
 # state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @buckets_router.tool(name="list_buckets", annotations={"readOnlyHint": True})
-async def list_buckets(plan_id: str, ctx: Context | None = None) -> list[PlannerBucket] | None:
+async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
     """List all buckets in a Planner plan.
 
     Args:
@@ -28,11 +28,15 @@ async def list_buckets(plan_id: str, ctx: Context | None = None) -> list[Planner
     if token is None:
         raise AuthorizationError("No access token available")
 
-    # ctx.info() is forwarded to the MCP client so progress is visible during
-    # the paginated Graph call. FastMCP injects ctx during dispatch; the None
-    # guard prevents AttributeError when the function is called directly in
-    # tests. Info level because bucket listing is a user-visible operation.
-    # Docs: https://gofastmcp.com/servers/logging
+    # get_context() retrieves the active MCP context inside a FastMCP request.
+    # It raises RuntimeError when called outside a request (e.g. unit tests);
+    # ctx = None in that case so logging is safely skipped.
+    # Docs: https://gofastmcp.com/servers/context#via-get_context-function
+    try:
+        ctx = get_context()
+    except RuntimeError:
+        ctx = None
+
     if ctx is not None:
         await ctx.info(f"Fetching buckets for plan {plan_id}")
 
