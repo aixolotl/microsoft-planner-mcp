@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
-from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_assignments import PlannerAssignments
 from msgraph.generated.models.planner_plan import PlannerPlan
