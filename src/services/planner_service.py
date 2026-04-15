@@ -18,13 +18,15 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import TypeVar
 
-from kiota_abstractions.base_request_builder import BaseRequestBuilder
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from kiota_abstractions.headers_collection import HeadersCollection
 from msgraph import GraphServiceClient
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
+from msgraph_core.tasks.page_iterator import PageIterator
+
+from ..types import CollectionRequestBuilder
 
 T = TypeVar("T")
 
@@ -40,25 +42,22 @@ class PlannerService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def paginate(request_builder: BaseRequestBuilder, request_configuration: RequestConfiguration | None = None) -> list:
-        """Fetch all pages from a Graph collection endpoint, following @odata.nextLink.
+    async def paginate(request_builder: CollectionRequestBuilder, request_configuration: RequestConfiguration | None = None) -> list:
+        """Fetch all pages from a Graph collection endpoint using PageIterator.
 
         Args:
-            request_builder: A Graph SDK request builder that supports .get() and .with_url().
+            request_builder: A Graph SDK request builder that supports .get().
             request_configuration: Optional RequestConfiguration for the first request.
-                Subsequent pages use the encoded URL from @odata.nextLink directly.
 
         Returns:
             Flat list of all items from all pages.
         """
+        result = await request_builder.get(request_configuration=request_configuration)
+        if result is None or not result.value:
+            return []
         all_items: list = []
-        result = await request_builder.get(request_configuration=request_configuration)  # type: ignore[arg-type]
-        while result is not None:
-            if result.value:
-                all_items.extend(result.value)
-            if not result.odata_next_link:
-                break
-            result = await request_builder.with_url(result.odata_next_link).get()
+        page_iterator = PageIterator(result, request_builder.request_adapter)
+        await page_iterator.iterate(lambda item: all_items.append(item) or True)
         return all_items
 
     @staticmethod
