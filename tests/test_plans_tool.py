@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from fastmcp.exceptions import AuthorizationError
+from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
 
 from src.tools.plans import list_group_plans, list_my_plans
@@ -58,11 +58,14 @@ def make_capturing_client() -> tuple[MagicMock, list]:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_no_token_raises_authorization_error():
+@pytest.mark.parametrize("coro_fn", [
+    lambda: list_my_plans(),
+    lambda: list_group_plans("group-1"),
+], ids=["list-my-plans", "list-group-plans"])
+async def test_no_token_raises(coro_fn):
     with patch(f"{MODULE}.get_access_token", return_value=None):
         with pytest.raises(AuthorizationError):
-            await list_my_plans()
+            await coro_fn()
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +73,6 @@ async def test_no_token_raises_authorization_error():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_returns_plan_list(graph_ctx):
     plans = [make_plan("plan-1"), make_plan("plan-2")]
 
@@ -80,7 +82,6 @@ async def test_returns_plan_list(graph_ctx):
     assert result == plans
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("get_return", [None, make_plans_result(None)], ids=["result-none", "value-none"])
 async def test_returns_none_when_no_plans(get_return, graph_ctx):
     graph_client = MagicMock()
@@ -97,7 +98,6 @@ async def test_returns_none_when_no_plans(get_return, graph_ctx):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("select_arg,expected", [
     ({"select": "id,title,owner,details"}, ["id", "title", "owner", "details"]),
     ({"select": "id,title"}, ["id", "title"]),
@@ -113,7 +113,6 @@ async def test_select_is_split_into_list(select_arg, expected, graph_ctx):
     assert captured[0].query_parameters.select == expected
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("select_arg", [
     {"select": "*all"},
     {"select": None},
@@ -128,21 +127,11 @@ async def test_select_passes_none_when_all_fields(select_arg, graph_ctx):
     assert captured[0].query_parameters.select is None
 
 
-@pytest.mark.asyncio
-async def test_obo_token_is_forwarded_to_for_user(make_access_token):
-    received_tokens: list[str] = []
-
-    @asynccontextmanager
-    async def _for_user(token: str):
-        received_tokens.append(token)
-        yield make_graph_client([])
-
-    with patch(f"{MODULE}.get_access_token", return_value=make_access_token("my-secret-obo")), \
-         patch(f"{MODULE}.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+async def test_obo_token_is_forwarded_to_for_user(token_capturing_ctx):
+    with token_capturing_ctx(MODULE, make_graph_client([]), "my-secret-obo") as received:
         await list_my_plans()
 
-    assert received_tokens == ["my-secret-obo"]
+    assert received == ["my-secret-obo"]
 
 
 # ---------------------------------------------------------------------------
@@ -150,14 +139,6 @@ async def test_obo_token_is_forwarded_to_for_user(make_access_token):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_list_group_plans_no_token_raises():
-    with patch(f"{MODULE}.get_access_token", return_value=None):
-        with pytest.raises(AuthorizationError):
-            await list_group_plans("group-1")
-
-
-@pytest.mark.asyncio
 async def test_list_group_plans_returns_plans(graph_ctx):
     plans = [make_plan("p1"), make_plan("p2")]
     graph_client = MagicMock()
@@ -172,7 +153,6 @@ async def test_list_group_plans_returns_plans(graph_ctx):
     graph_client.groups.by_group_id.assert_called_once_with("group-1")
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("get_return", [None, make_plans_result(None)], ids=["result-none", "value-none"])
 async def test_list_group_plans_returns_none_when_empty(get_return, graph_ctx):
     graph_client = MagicMock()
@@ -184,7 +164,6 @@ async def test_list_group_plans_returns_none_when_empty(get_return, graph_ctx):
     assert result is None
 
 
-@pytest.mark.asyncio
 async def test_list_group_plans_403_raises_value_error(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
@@ -196,7 +175,6 @@ async def test_list_group_plans_403_raises_value_error(graph_ctx, make_odata_err
             await list_group_plans("group-1")
 
 
-@pytest.mark.asyncio
 async def test_list_group_plans_403_error_message_includes_code(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
@@ -208,10 +186,7 @@ async def test_list_group_plans_403_error_message_includes_code(graph_ctx, make_
             await list_group_plans("group-1")
 
 
-@pytest.mark.asyncio
 async def test_list_group_plans_non_403_odata_error_reraises(graph_ctx, make_odata_error):
-    from msgraph.generated.models.o_data_errors.o_data_error import ODataError
-
     graph_client = MagicMock()
     graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
         side_effect=make_odata_error(404, "ResourceNotFound")
@@ -224,22 +199,13 @@ async def test_list_group_plans_non_403_odata_error_reraises(graph_ctx, make_oda
     assert exc_info.value.response_status_code == 404
 
 
-@pytest.mark.asyncio
-async def test_list_group_plans_forwards_obo_token(make_access_token):
-    received: list[str] = []
+async def test_list_group_plans_forwards_obo_token(token_capturing_ctx):
+    graph_client = MagicMock()
+    graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
+        return_value=make_plans_result([])
+    )
 
-    @asynccontextmanager
-    async def _for_user(token: str):
-        received.append(token)
-        graph_client = MagicMock()
-        graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
-            return_value=make_plans_result([])
-        )
-        yield graph_client
-
-    with patch(f"{MODULE}.get_access_token", return_value=make_access_token("my-obo")), \
-         patch(f"{MODULE}.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with token_capturing_ctx(MODULE, graph_client, "my-obo") as received:
         await list_group_plans("group-1")
 
     assert received == ["my-obo"]

@@ -1,12 +1,12 @@
 ---
 applyTo: "tests/**"
-description: "Use when writing or modifying tests. Covers pytest-asyncio strict mode, parameterized test conventions, mock patterns, and test file structure for this project."
+description: "Use when writing or modifying tests. Covers pytest-asyncio auto mode, parameterized test conventions, mock patterns, and test file structure for this project."
 ---
 # Testing Conventions
 
 ## Framework
 
-- **pytest** with **pytest-asyncio** in `strict` mode — every async test needs `@pytest.mark.asyncio`
+- **pytest** with **pytest-asyncio** in `auto` mode — async tests are detected automatically, no `@pytest.mark.asyncio` needed
 - Run tests: `uv run pytest -v`
 
 ## Parameterized Tests
@@ -14,7 +14,6 @@ description: "Use when writing or modifying tests. Covers pytest-asyncio strict 
 Always use `@pytest.mark.parametrize` with the `ids` keyword for readable test output. Place the decorator directly above the test function (after `@pytest.mark.asyncio` if async).
 
 ```python
-@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [412, 409], ids=["conflict-412", "conflict-409"])
 async def test_retries_on_conflict(status):
     ...
@@ -53,22 +52,32 @@ Rules:
 ## Mock Patterns
 
 - `AsyncMock` for async methods, `MagicMock` for sync objects
-- Use `@asynccontextmanager` + `yield` to mock `graph_client_manager.for_user()`
 - Patch at the import location: `patch("src.tools.plans.get_access_token", ...)`
 - Use `make_*` factory helpers to construct test doubles — keep tests declarative
+- Use the `graph_ctx` fixture (from `conftest.py`) to patch both `get_access_token` and `graph_client_manager.for_user` in one step
+- Use the `token_capturing_ctx` fixture when you need to assert which OBO token was forwarded
 
 ```python
-from contextlib import asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+# Standard tool test — graph_ctx patches auth + client in one context manager
+async def test_returns_result(graph_ctx):
+    graph_client = MagicMock()
+    graph_client.planner.tasks.get = AsyncMock(return_value=make_tasks_result(tasks))
 
-@asynccontextmanager
-async def _for_user(token):
-    yield graph_client
+    with graph_ctx(MODULE, graph_client):
+        result = await list_tasks("plan-1")
 
-with patch("src.tools.module.get_access_token", return_value=make_access_token()), \
-     patch("src.tools.module.graph_client_manager") as mock_mgr:
-    mock_mgr.for_user = _for_user
-    result = await tool_function()
+    assert result == tasks
+
+
+# OBO token forwarding — token_capturing_ctx records the token passed to for_user
+async def test_obo_token_forwarded(token_capturing_ctx):
+    graph_client = MagicMock()
+    graph_client.planner.tasks.get = AsyncMock(return_value=make_tasks_result([]))
+
+    with token_capturing_ctx(MODULE, graph_client, "my-obo") as received:
+        await list_tasks("plan-1")
+
+    assert received == ["my-obo"]
 ```
 
 ## Naming

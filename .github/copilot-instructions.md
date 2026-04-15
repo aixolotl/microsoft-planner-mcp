@@ -10,7 +10,7 @@ MCP server for Microsoft Planner built with FastMCP and Microsoft Graph SDK. Aut
 - **FastMCP** (`fastmcp[apps]`) — MCP server framework with routers, tools, and OAuth
 - **Microsoft Graph SDK** (`msgraph-sdk`) — Planner API via `GraphServiceClient`
 - **Pydantic Settings** — environment-based configuration
-- **pytest + pytest-asyncio** (strict mode) — testing
+- **pytest + pytest-asyncio** (auto mode) — testing
 - **uv** — package manager and task runner
 
 ## Project Structure

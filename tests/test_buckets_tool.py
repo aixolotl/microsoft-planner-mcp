@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -39,14 +38,12 @@ def make_buckets_result(buckets) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_list_buckets_no_token_raises():
     with patch(f"{MODULE}.get_access_token", return_value=None):
         with pytest.raises(AuthorizationError):
             await list_buckets("plan-1")
 
 
-@pytest.mark.asyncio
 async def test_list_buckets_returns_buckets(graph_ctx):
     buckets = [make_bucket("b1", "To Do"), make_bucket("b2", "In Progress")]
     graph_client = MagicMock()
@@ -61,7 +58,6 @@ async def test_list_buckets_returns_buckets(graph_ctx):
     graph_client.planner.plans.by_planner_plan_id.assert_called_once_with("plan-1")
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("get_return", [None, make_buckets_result(None)], ids=["result-none", "value-none"])
 async def test_list_buckets_returns_none_when_empty(get_return, graph_ctx):
     graph_client = MagicMock()
@@ -73,28 +69,18 @@ async def test_list_buckets_returns_none_when_empty(get_return, graph_ctx):
     assert result is None
 
 
-@pytest.mark.asyncio
-async def test_list_buckets_forwards_obo_token(make_access_token):
-    received: list[str] = []
+async def test_list_buckets_forwards_obo_token(token_capturing_ctx):
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.buckets.get = AsyncMock(
+        return_value=make_buckets_result([])
+    )
 
-    @asynccontextmanager
-    async def _for_user(token: str):
-        received.append(token)
-        graph_client = MagicMock()
-        graph_client.planner.plans.by_planner_plan_id.return_value.buckets.get = AsyncMock(
-            return_value=make_buckets_result([])
-        )
-        yield graph_client
-
-    with patch(f"{MODULE}.get_access_token", return_value=make_access_token("my-obo")), \
-         patch(f"{MODULE}.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with token_capturing_ctx(MODULE, graph_client, "my-obo") as received:
         await list_buckets("plan-1")
 
     assert received == ["my-obo"]
 
 
-@pytest.mark.asyncio
 async def test_list_buckets_passes_plan_id(graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.plans.by_planner_plan_id.return_value.buckets.get = AsyncMock(

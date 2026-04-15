@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -89,18 +88,30 @@ def make_plan_capturing_client() -> tuple[MagicMock, list]:
 
 
 # ---------------------------------------------------------------------------
+# authorisation — all tools raise when no token
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("coro_fn", [
+    lambda: list_my_tasks(),
+    lambda: get_task_details("task-1"),
+    lambda: update_task("task-1", '"etag-v1"', title="New Title"),
+    lambda: update_task_details("task-1", '"etag-v1"', description="x"),
+    lambda: delete_task("task-1", '"etag-v1"'),
+    lambda: list_tasks("plan-1"),
+    lambda: create_task("plan-1", "bucket-1", "My Task"),
+], ids=["list-my-tasks", "get-task-details", "update-task", "update-task-details", "delete-task", "list-tasks", "create-task"])
+async def test_no_token_raises(coro_fn):
+    with patch(f"{MODULE}.get_access_token", return_value=None):
+        with pytest.raises(AuthorizationError):
+            await coro_fn()
+
+
+# ---------------------------------------------------------------------------
 # list_my_tasks
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_list_my_tasks_no_token_raises():
-    with patch(f"{MODULE}.get_access_token", return_value=None):
-        with pytest.raises(AuthorizationError):
-            await list_my_tasks()
-
-
-@pytest.mark.asyncio
 async def test_list_my_tasks_returns_tasks(graph_ctx):
     tasks = [make_task("task-1"), make_task("task-2")]
     graph_client = MagicMock()
@@ -112,7 +123,6 @@ async def test_list_my_tasks_returns_tasks(graph_ctx):
     assert result == tasks
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("get_return", [None, make_tasks_result(None)], ids=["result-none", "value-none"])
 async def test_list_my_tasks_returns_none_when_empty(get_return, graph_ctx):
     graph_client = MagicMock()
@@ -124,26 +134,16 @@ async def test_list_my_tasks_returns_none_when_empty(get_return, graph_ctx):
     assert result is None
 
 
-@pytest.mark.asyncio
-async def test_list_my_tasks_forwards_obo_token(make_access_token):
-    received: list[str] = []
+async def test_list_my_tasks_forwards_obo_token(token_capturing_ctx):
+    graph_client = MagicMock()
+    graph_client.me.planner.tasks.get = AsyncMock(return_value=make_tasks_result([]))
 
-    @asynccontextmanager
-    async def _for_user(token: str):
-        received.append(token)
-        client = MagicMock()
-        client.me.planner.tasks.get = AsyncMock(return_value=make_tasks_result([]))
-        yield client
-
-    with patch(f"{MODULE}.get_access_token", return_value=make_access_token("my-obo")), \
-         patch(f"{MODULE}.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
+    with token_capturing_ctx(MODULE, graph_client, "my-obo") as received:
         await list_my_tasks()
 
     assert received == ["my-obo"]
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("select_arg,expected", [
     ({"select": "id,title,planId"}, ["id", "title", "planId"]),
     ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),  # default
@@ -158,7 +158,6 @@ async def test_list_my_tasks_select_is_split_into_list(select_arg, expected, gra
     assert captured[0].query_parameters.select == expected
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("select_arg", [
     {"select": "*all"},
     {"select": None},
@@ -178,14 +177,6 @@ async def test_list_my_tasks_select_passes_none_when_all_fields(select_arg, grap
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_get_task_details_no_token_raises():
-    with patch(f"{MODULE}.get_access_token", return_value=None):
-        with pytest.raises(AuthorizationError):
-            await get_task_details("task-1")
-
-
-@pytest.mark.asyncio
 async def test_get_task_details_returns_details(graph_ctx):
     details = make_details()
     graph_client = MagicMock()
@@ -198,7 +189,6 @@ async def test_get_task_details_returns_details(graph_ctx):
     graph_client.planner.tasks.by_planner_task_id.assert_called_once_with("task-1")
 
 
-@pytest.mark.asyncio
 async def test_get_task_details_returns_none_when_not_found(graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.by_planner_task_id.return_value.details.get = AsyncMock(return_value=None)
@@ -214,14 +204,6 @@ async def test_get_task_details_returns_none_when_not_found(graph_ctx):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_update_task_no_token_raises():
-    with patch(f"{MODULE}.get_access_token", return_value=None):
-        with pytest.raises(AuthorizationError):
-            await update_task("task-1", '"etag-v1"', title="New Title")
-
-
-@pytest.mark.asyncio
 async def test_update_task_returns_updated_task(graph_ctx):
     updated = make_task(title="Updated")
     svc = make_patch_svc(return_value=updated)
@@ -236,7 +218,6 @@ async def test_update_task_returns_updated_task(graph_ctx):
     assert call_etag == '"etag-v1"'
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("field,value,attr", [
     ("percent_complete", 50, "percent_complete"),
     ("bucket_id", "bucket-abc", "bucket_id"),
@@ -252,7 +233,6 @@ async def test_update_task_sets_scalar_fields(field, value, attr, graph_ctx):
     assert getattr(body, attr) == value
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("due_str,expected_utc", [
     ("2026-05-31T00:00:00", datetime(2026, 5, 31, 0, 0, 0, tzinfo=timezone.utc)),
     ("2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
@@ -269,7 +249,6 @@ async def test_update_task_converts_due_date_to_utc(due_str, expected_utc, graph
     assert body.due_date_time == expected_utc
 
 
-@pytest.mark.asyncio
 async def test_update_task_assign_users_builds_correct_additional_data(graph_ctx):
     svc = make_patch_svc(return_value=make_task())
 
@@ -284,7 +263,6 @@ async def test_update_task_assign_users_builds_correct_additional_data(graph_ctx
     assert body.assignments.additional_data["user-b"] is None
 
 
-@pytest.mark.asyncio
 async def test_update_task_no_fields_sends_empty_body(graph_ctx):
     """Calling update_task with only required args sends an empty PlannerTask body."""
     svc = make_patch_svc(return_value=make_task())
@@ -302,14 +280,6 @@ async def test_update_task_no_fields_sends_empty_body(graph_ctx):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_update_task_details_no_token_raises():
-    with patch(f"{MODULE}.get_access_token", return_value=None):
-        with pytest.raises(AuthorizationError):
-            await update_task_details("task-1", '"etag-v1"', description="x")
-
-
-@pytest.mark.asyncio
 async def test_update_task_details_returns_updated_details(graph_ctx):
     updated = make_details("new desc")
     svc = make_patch_svc(return_value=updated)
@@ -324,7 +294,6 @@ async def test_update_task_details_returns_updated_details(graph_ctx):
     assert etag == '"etag-v1"'
 
 
-@pytest.mark.asyncio
 async def test_update_task_details_sets_checklist_and_references(graph_ctx):
     svc = make_patch_svc(return_value=make_details())
     checklist = {"guid-1": {"@odata.type": "microsoft.graph.plannerChecklistItem", "title": "Step 1", "isChecked": False}}
@@ -338,7 +307,6 @@ async def test_update_task_details_sets_checklist_and_references(graph_ctx):
     assert body.references.additional_data == refs
 
 
-@pytest.mark.asyncio
 async def test_update_task_details_403_raises_value_error(graph_ctx, make_odata_error):
     svc = make_patch_svc(side_effect=make_odata_error(403, "MaximumChecklistItemsOnTask", "Too many items"))
 
@@ -347,7 +315,6 @@ async def test_update_task_details_403_raises_value_error(graph_ctx, make_odata_
             await update_task_details("task-1", '"etag-v1"', description="x")
 
 
-@pytest.mark.asyncio
 async def test_update_task_details_non_403_odata_error_reraises(graph_ctx, make_odata_error):
     svc = make_patch_svc(side_effect=make_odata_error(400, "BadRequest"))
 
@@ -363,14 +330,6 @@ async def test_update_task_details_non_403_odata_error_reraises(graph_ctx, make_
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_delete_task_no_token_raises():
-    with patch(f"{MODULE}.get_access_token", return_value=None):
-        with pytest.raises(AuthorizationError):
-            await delete_task("task-1", '"etag-v1"')
-
-
-@pytest.mark.asyncio
 async def test_delete_task_delegates_to_service(graph_ctx):
     svc = make_patch_svc()
 
@@ -380,7 +339,6 @@ async def test_delete_task_delegates_to_service(graph_ctx):
     svc.delete_task.assert_awaited_once_with("task-1", '"etag-v1"')
 
 
-@pytest.mark.asyncio
 async def test_delete_task_returns_none(graph_ctx):
     svc = make_patch_svc()
 
@@ -395,14 +353,6 @@ async def test_delete_task_returns_none(graph_ctx):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_list_tasks_no_token_raises():
-    with patch(f"{MODULE}.get_access_token", return_value=None):
-        with pytest.raises(AuthorizationError):
-            await list_tasks("plan-1")
-
-
-@pytest.mark.asyncio
 async def test_list_tasks_returns_tasks(graph_ctx):
     tasks = [make_task("t1"), make_task("t2")]
     graph_client = MagicMock()
@@ -417,7 +367,6 @@ async def test_list_tasks_returns_tasks(graph_ctx):
     graph_client.planner.plans.by_planner_plan_id.assert_called_once_with("plan-1")
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("get_return", [None, make_tasks_result(None)], ids=["result-none", "value-none"])
 async def test_list_tasks_returns_none_when_empty(get_return, graph_ctx):
     graph_client = MagicMock()
@@ -429,7 +378,6 @@ async def test_list_tasks_returns_none_when_empty(get_return, graph_ctx):
     assert result is None
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("select_arg,expected", [
     ({"select": "id,title"}, ["id", "title"]),
     ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),  # default
@@ -444,7 +392,6 @@ async def test_list_tasks_select_is_split_into_list(select_arg, expected, graph_
     assert captured[0].query_parameters.select == expected
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("select_arg", [
     {"select": "*all"},
     {"select": None},
@@ -464,14 +411,6 @@ async def test_list_tasks_select_passes_none_when_all_fields(select_arg, graph_c
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_create_task_no_token_raises():
-    with patch(f"{MODULE}.get_access_token", return_value=None):
-        with pytest.raises(AuthorizationError):
-            await create_task("plan-1", "bucket-1", "My Task")
-
-
-@pytest.mark.asyncio
 async def test_create_task_returns_created_task(graph_ctx):
     created = make_task("new-task", "My Task")
     graph_client = MagicMock()
@@ -487,7 +426,6 @@ async def test_create_task_returns_created_task(graph_ctx):
     assert body.title == "My Task"
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("due_str,expected_utc", [
     ("2026-05-31T00:00:00", datetime(2026, 5, 31, 0, 0, 0, tzinfo=timezone.utc)),
     ("2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
@@ -503,7 +441,6 @@ async def test_create_task_converts_due_date_to_utc(due_str, expected_utc, graph
     assert body.due_date_time == expected_utc
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("start_str,expected_utc", [
     ("2026-05-01T00:00:00", datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)),
     ("2026-05-01T06:00:00+06:00", datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)),
@@ -519,7 +456,6 @@ async def test_create_task_converts_start_date_to_utc(start_str, expected_utc, g
     assert body.start_date_time == expected_utc
 
 
-@pytest.mark.asyncio
 async def test_create_task_raises_when_start_after_due(graph_ctx):
     with graph_ctx(MODULE, MagicMock()):
         with pytest.raises(ValueError, match="must not be after"):
@@ -530,7 +466,6 @@ async def test_create_task_raises_when_start_after_due(graph_ctx):
             )
 
 
-@pytest.mark.asyncio
 async def test_create_task_assigns_users(graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
@@ -549,7 +484,6 @@ async def test_create_task_assigns_users(graph_ctx):
     }
 
 
-@pytest.mark.asyncio
 async def test_create_task_sets_optional_fields(graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
@@ -561,7 +495,6 @@ async def test_create_task_sets_optional_fields(graph_ctx):
     assert body.percent_complete == 50
 
 
-@pytest.mark.asyncio
 async def test_create_task_403_raises_value_error(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(side_effect=make_odata_error(403, "MaximumTasksInProject"))
@@ -571,7 +504,6 @@ async def test_create_task_403_raises_value_error(graph_ctx, make_odata_error):
             await create_task("plan-1", "bucket-1", "Task")
 
 
-@pytest.mark.asyncio
 async def test_create_task_non_403_odata_error_reraises(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(side_effect=make_odata_error(400, "BadRequest"))

@@ -86,7 +86,6 @@ def test_configs_do_not_share_headers():
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_patch_task_success():
     updated = make_task('"etag-v2"')
     client = make_graph_client(patch_return=updated)
@@ -98,7 +97,6 @@ async def test_patch_task_success():
     client.planner.tasks.by_planner_task_id.return_value.patch.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [412, 409], ids=["precondition-failed-412", "conflict-409"])
 async def test_patch_task_retries_on_conflict(status, make_odata_error):
     fresh_task = make_task('"etag-fresh"')
@@ -115,7 +113,6 @@ async def test_patch_task_retries_on_conflict(status, make_odata_error):
     assert client.planner.tasks.by_planner_task_id.return_value.patch.await_count == 2
 
 
-@pytest.mark.asyncio
 async def test_patch_task_retry_uses_fresh_etag(make_odata_error):
     """Retry must send the refreshed ETag, not the original stale one."""
     captured: list = []
@@ -138,7 +135,6 @@ async def test_patch_task_retry_uses_fresh_etag(make_odata_error):
     assert list(captured[1].headers.get("if-match"))[0] == '"etag-fresh"'
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "MaximumTasksInProject")], ids=["bad-request-400", "maximum-tasks-in-project-403"])
 async def test_patch_task_non_retryable_raises(status, code, make_odata_error):
     client = make_graph_client(patch_side_effect=make_odata_error(status, code))
@@ -156,7 +152,6 @@ async def test_patch_task_non_retryable_raises(status, code, make_odata_error):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_delete_task_success():
     client = make_graph_client()
 
@@ -165,7 +160,6 @@ async def test_delete_task_success():
     client.planner.tasks.by_planner_task_id.return_value.delete.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 async def test_delete_task_retries_on_412(make_odata_error):
     """Confirms delete_task is wired through _with_retry; 412/409 branch proven by patch tests."""
     client = make_graph_client(
@@ -179,7 +173,6 @@ async def test_delete_task_retries_on_412(make_odata_error):
     assert client.planner.tasks.by_planner_task_id.return_value.delete.await_count == 2
 
 
-@pytest.mark.asyncio
 async def test_delete_task_non_retryable_raises(make_odata_error):
     client = make_graph_client(delete_side_effect=make_odata_error(403, "MaximumTasksInProject", "Over limit"))
 
@@ -196,7 +189,6 @@ async def test_delete_task_non_retryable_raises(make_odata_error):
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
 async def test_patch_task_details_success():
     updated = make_details('"details-etag-v2"')
     client = make_graph_client(details_patch_return=updated)
@@ -208,7 +200,6 @@ async def test_patch_task_details_success():
     client.planner.tasks.by_planner_task_id.return_value.details.patch.assert_awaited_once()
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("status", [412, 409], ids=["precondition-failed-412", "conflict-409"])
 async def test_patch_task_details_retries_on_conflict(status, make_odata_error):
     fresh = make_details('"details-etag-fresh"')
@@ -225,7 +216,6 @@ async def test_patch_task_details_retries_on_conflict(status, make_odata_error):
     assert client.planner.tasks.by_planner_task_id.return_value.details.patch.await_count == 2
 
 
-@pytest.mark.asyncio
 async def test_patch_task_details_retry_uses_fresh_etag(make_odata_error):
     captured: list = []
 
@@ -249,7 +239,6 @@ async def test_patch_task_details_retry_uses_fresh_etag(make_odata_error):
     assert list(captured[1].headers.get("if-match"))[0] == '"details-etag-fresh"'
 
 
-@pytest.mark.asyncio
 @pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "Forbidden")], ids=["bad-request-400", "forbidden-403"])
 async def test_patch_task_details_non_retryable_raises(status, code, make_odata_error):
     client = make_graph_client(details_patch_side_effect=make_odata_error(status, code))

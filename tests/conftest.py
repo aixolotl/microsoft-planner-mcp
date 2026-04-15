@@ -61,3 +61,38 @@ def graph_ctx():
             yield
 
     return _ctx
+
+
+@pytest.fixture
+def token_capturing_ctx():
+    """Factory fixture: patches get_access_token and graph_client_manager.for_user for the
+    given module, captures every token string passed to for_user, and yields the list.
+
+    Usage::
+
+        async def test_obo_token_forwarded(token_capturing_ctx):
+            graph_client = MagicMock()
+            graph_client.me.planner.tasks.get = AsyncMock(return_value=...)
+
+            with token_capturing_ctx(MODULE, graph_client, "my-obo") as received:
+                await some_tool()
+
+            assert received == ["my-obo"]
+    """
+    @contextmanager
+    def _ctx(module: str, graph_client: MagicMock, token_str: str = "my-obo"):
+        received: list[str] = []
+        token = MagicMock()
+        token.token = token_str
+
+        @asynccontextmanager
+        async def _for_user(t: str):
+            received.append(t)
+            yield graph_client
+
+        with patch(f"{module}.get_access_token", return_value=token), \
+             patch(f"{module}.graph_client_manager") as mock_mgr:
+            mock_mgr.for_user = _for_user
+            yield received
+
+    return _ctx
