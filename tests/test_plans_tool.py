@@ -92,7 +92,7 @@ async def test_returns_plan_list():
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("get_return", [None, make_plans_result(None)], ids=["result-none", "value-none"])
-async def test_returns_empty_list_when_no_plans(get_return):
+async def test_returns_none_when_no_plans(get_return):
     graph_client = MagicMock()
     graph_client.me.planner.plans.get = AsyncMock(return_value=get_return)
 
@@ -105,7 +105,7 @@ async def test_returns_empty_list_when_no_plans(get_return):
         mock_mgr.for_user = _for_user
         result = await list_my_plans()
 
-    assert result == []
+    assert result is None
 
 
 # ---------------------------------------------------------------------------

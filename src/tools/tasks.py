@@ -5,8 +5,6 @@ from datetime import datetime, timezone
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
-from kiota_abstractions.base_request_configuration import RequestConfiguration
-from kiota_abstractions.headers_collection import HeadersCollection
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_assignments import PlannerAssignments
 from msgraph.generated.models.planner_checklist_items import PlannerChecklistItems
@@ -18,24 +16,6 @@ from ..graph_client_manager import graph_client_manager
 from ..services.planner_service import PlannerService
 
 tasks_router = FastMCP("tasks")
-
-
-def _details_config(etag: str) -> RequestConfiguration:
-    headers = HeadersCollection()
-    headers.add("If-Match", etag)
-    headers.add("Prefer", "return=representation")
-    return RequestConfiguration(headers=headers)
-
-
-async def _patch_task_details(
-    graph_client,
-    task_id: str,
-    body: PlannerTaskDetails,
-    etag: str,
-) -> PlannerTaskDetails | None:
-    return await graph_client.planner.tasks.by_planner_task_id(
-        task_id
-    ).details.patch(body, request_configuration=_details_config(etag))
 
 
 @tasks_router.tool(name="list_my_tasks", annotations={"readOnlyHint": True})
@@ -107,26 +87,25 @@ async def update_task(
     if token is None:
         raise AuthorizationError("No access token available")
 
+    def _to_utc(s: str) -> datetime:
+        dt = datetime.fromisoformat(s)
+        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
     body = PlannerTask()
-    if title is not None:
-        body.title = title
-    if percent_complete is not None:
-        body.percent_complete = percent_complete
-    if bucket_id is not None:
-        body.bucket_id = bucket_id
-    if assignee_priority is not None:
-        body.assignee_priority = assignee_priority
-    if due_date_time is not None:
-        body.due_date_time = datetime.fromisoformat(due_date_time).replace(tzinfo=timezone.utc)
+    for attr, value in [
+        ("title", title),
+        ("percent_complete", percent_complete),
+        ("bucket_id", bucket_id),
+        ("assignee_priority", assignee_priority),
+        ("due_date_time", _to_utc(due_date_time) if due_date_time is not None else None),
+    ]:
+        if value is not None:
+            setattr(body, attr, value)
     if assign_user_ids or unassign_user_ids:
-        assignment_data: dict = {}
-        for user_id in (assign_user_ids or []):
-            assignment_data[user_id] = {
-                "@odata_type": "#microsoft.graph.plannerAssignment",
-                "order_hint": " !",
-            }
-        for user_id in (unassign_user_ids or []):
-            assignment_data[user_id] = None
+        assignment_data: dict = {
+            user_id: {"@odata.type": "#microsoft.graph.plannerAssignment", "orderHint": " !"}
+            for user_id in (assign_user_ids or [])
+        } | {user_id: None for user_id in (unassign_user_ids or [])}
         body.assignments = PlannerAssignments(additional_data=assignment_data)
 
     async with graph_client_manager.for_user(token.token) as graph_client:
@@ -146,12 +125,12 @@ async def update_task_details(
 
     Args:
         task_id: The ID of the task to update.
-        etag: The current @odata.etag of the task *details* resource (from get_task_details). Retries once automatically if stale (412/409).
+        etag: The current @odata.etag of the task details resource (from get_task_details). Retries once automatically if stale (412/409).
         description: New plain-text description for the task.
         checklist_items: Dict keyed by checklist item GUID. Pass null for a key to delete that item.
-            Example: { "<guid>": { "@odata_type": "microsoft.graph.plannerChecklistItem", "title": "...", "is_checked": false } }
+            Example: { "<guid>": { "@odata.type": "microsoft.graph.plannerChecklistItem", "title": "...", "isChecked": false } }
         references: Dict keyed by URL-encoded reference URL (periods → %2E, colons → %3A). Pass null for a key to delete that reference.
-            Example: { "https%3A//example%2Ecom": { "@odata_type": "microsoft.graph.plannerExternalReference", "alias": "...", "preview_priority": " !", "type": "Other" } }
+            Example: { "https%3A//example%2Ecom": { "@odata.type": "microsoft.graph.plannerExternalReference", "alias": "...", "previewPriority": " !", "type": "Other" } }
 
     Returns:
         The updated PlannerTaskDetails object.
@@ -169,20 +148,15 @@ async def update_task_details(
         body.references = PlannerExternalReferences(additional_data=references)
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         try:
-            return await _patch_task_details(graph_client, task_id, body, etag)
+            return await svc.patch_task_details(task_id, body, etag)
         except ODataError as exc:
             if exc.response_status_code == 403:
                 code = exc.error.code if exc.error else None
                 msg = exc.error.message if exc.error else exc.primary_message
                 raise ValueError(f"Cannot update task details ({code}): {msg}") from exc
-            if exc.response_status_code not in (409, 412):
-                raise
-            fresh = await graph_client.planner.tasks.by_planner_task_id(task_id).details.get()
-            fresh_etag: str | None = fresh.additional_data.get("@odata.etag") if fresh else None
-            if not fresh_etag:
-                raise
-            return await _patch_task_details(graph_client, task_id, body, fresh_etag)
+            raise
 
 
 @tasks_router.tool(name="delete_task")
