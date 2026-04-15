@@ -6,6 +6,7 @@ from fastmcp.server.dependencies import get_access_token
 from msgraph.generated.models.planner_bucket import PlannerBucket
 
 from ..graph_client_manager import graph_client_manager
+from ..services.planner_service import PlannerService
 
 buckets_router = FastMCP("buckets")
 
@@ -25,6 +26,6 @@ async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
         raise AuthorizationError("No access token available")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        result = await graph_client.planner.plans.by_planner_plan_id(plan_id).buckets.get()
+        buckets = await PlannerService.paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
 
-    return result.value if result else None
+    return buckets or None

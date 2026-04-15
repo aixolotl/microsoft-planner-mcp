@@ -32,6 +32,7 @@ def make_task(task_id: str = "task-1", title: str = "My Task") -> PlannerTask:
 def make_tasks_result(tasks) -> MagicMock:
     result = MagicMock()
     result.value = tasks
+    result.odata_next_link = None
     return result
 
 

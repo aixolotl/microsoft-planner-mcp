@@ -7,6 +7,7 @@ from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
 
 from ..graph_client_manager import graph_client_manager
+from ..services.planner_service import PlannerService
 
 group_plans_router = FastMCP("group_plans")
 
@@ -27,7 +28,7 @@ async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
-            result = await graph_client.groups.by_group_id(group_id).planner.plans.get()
+            plans = await PlannerService.paginate(graph_client.groups.by_group_id(group_id).planner.plans)
         except ODataError as exc:
             if exc.response_status_code != 403:
                 raise
@@ -35,4 +36,4 @@ async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
             msg = exc.error.message if exc.error else exc.primary_message
             raise ValueError(f"Access denied for group {group_id!r} ({code}): {msg}") from exc
 
-    return result.value if result else None
+    return plans or None

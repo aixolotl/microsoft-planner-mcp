@@ -31,6 +31,7 @@ def make_plan(plan_id: str = "plan-1", title: str = "Group Plan") -> PlannerPlan
 def make_plans_result(plans) -> MagicMock:
     result = MagicMock()
     result.value = plans
+    result.odata_next_link = None
     return result
 
 

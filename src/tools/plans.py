@@ -5,10 +5,12 @@ from datetime import datetime, timezone
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
+from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_assignments import PlannerAssignments
 from msgraph.generated.models.planner_plan import PlannerPlan
 from msgraph.generated.models.planner_task import PlannerTask
+from msgraph.generated.users.item.planner.plans.plans_request_builder import PlansRequestBuilder
 
 from ..graph_client_manager import graph_client_manager
 from ..services.planner_service import PlannerService
@@ -42,8 +44,14 @@ async def list_my_plans(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        service = PlannerService(graph_client)
-        all_plans = await service.list_my_plans(select=select_fields)
+        all_plans = await PlannerService.paginate(
+            graph_client.me.planner.plans,
+            RequestConfiguration(
+                query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
+                    select=select_fields
+                )
+            ),
+        )
 
     return all_plans or None
 
@@ -63,9 +71,9 @@ async def list_tasks(plan_id: str) -> list[PlannerTask] | None:
         raise AuthorizationError("No access token available")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        result = await graph_client.planner.plans.by_planner_plan_id(plan_id).tasks.get()
+        tasks = await PlannerService.paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).tasks)
 
-    return result.value if result else None
+    return tasks or None
 
 
 @plans_router.tool(name="create_task")

@@ -30,9 +30,9 @@ async def list_my_tasks() -> list[PlannerTask] | None:
         raise AuthorizationError("No access token available")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        result = await graph_client.me.planner.tasks.get()
+        tasks = await PlannerService.paginate(graph_client.me.planner.tasks)
 
-    return result.value if result else None
+    return tasks or None
 
 
 @tasks_router.tool(name="get_task_details", annotations={"readOnlyHint": True})

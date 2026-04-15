@@ -15,16 +15,15 @@ is raised from _refresh_task_etag.
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from kiota_abstractions.headers_collection import HeadersCollection
 from msgraph import GraphServiceClient
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
-from msgraph.generated.models.planner_plan import PlannerPlan
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
-from msgraph.generated.users.item.planner.plans.plans_request_builder import PlansRequestBuilder
+
 T = TypeVar("T")
 
 
@@ -37,6 +36,28 @@ class PlannerService:
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    @staticmethod
+    async def paginate(request_builder: Any, request_configuration: Any = None) -> list:
+        """Fetch all pages from a Graph collection endpoint, following @odata.nextLink.
+
+        Args:
+            request_builder: A Graph SDK request builder that supports .get() and .with_url().
+            request_configuration: Optional RequestConfiguration for the first request.
+                Subsequent pages use the encoded URL from @odata.nextLink directly.
+
+        Returns:
+            Flat list of all items from all pages.
+        """
+        all_items: list = []
+        result = await request_builder.get(request_configuration=request_configuration)  # type: ignore[arg-type]
+        while result is not None:
+            if result.value:
+                all_items.extend(result.value)
+            if not result.odata_next_link:
+                break
+            result = await request_builder.with_url(result.odata_next_link).get()
+        return all_items
 
     @staticmethod
     def _make_config(etag: str, *, prefer_representation: bool = False) -> RequestConfiguration:
@@ -79,24 +100,6 @@ class PlannerService:
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
-
-    async def list_my_plans(self, select: list[str] | None = None) -> list[PlannerPlan]:
-        """Return all plans accessible to the user, following pagination links."""
-        request_configuration = RequestConfiguration(
-            query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(select=select)
-        )
-
-        all_plans: list[PlannerPlan] = []
-        result = await self._client.me.planner.plans.get(request_configuration=request_configuration)  # type: ignore[arg-type]
-        if result and result.value:
-            all_plans.extend(result.value)
-        while result is not None and result.odata_next_link is not None:
-            result = await self._client.me.planner.plans.with_url(result.odata_next_link).get(
-                request_configuration=request_configuration  # ty:ignore[invalid-argument-type]
-            )
-            if result and result.value:
-                all_plans.extend(result.value)
-        return all_plans
 
     async def patch_task(
         self,

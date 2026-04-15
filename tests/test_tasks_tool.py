@@ -47,6 +47,7 @@ def make_details(description: str = "desc", etag: str = '"details-etag-v1"') -> 
 def make_tasks_result(tasks) -> MagicMock:
     result = MagicMock()
     result.value = tasks
+    result.odata_next_link = None
     return result
 
 

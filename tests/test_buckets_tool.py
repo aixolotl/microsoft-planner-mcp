@@ -30,6 +30,7 @@ def make_bucket(bucket_id: str = "bucket-1", name: str = "To Do") -> PlannerBuck
 def make_buckets_result(buckets) -> MagicMock:
     result = MagicMock()
     result.value = buckets
+    result.odata_next_link = None
     return result
 
 
