@@ -11,8 +11,8 @@ An MCP server for Microsoft Planner built with [fastmcp](https://github.com/jlow
    - Add a scope named **`mcp-access`** (admin consent required)
 4. Under **Manifest**, set `"requestedAccessTokenVersion": 2`
 5. Under **API permissions → Add a permission → Microsoft Graph → Delegated**:
-   - Add `Tasks.ReadWrite` and `User.Read`
-   - Click **Grant admin consent**
+   - Add `Tasks.ReadWrite`, `User.Read`, and `Group.Read.All`
+   - Click **Grant admin consent** (`Group.Read.All` requires admin consent to use)
 6. Under **Certificates & secrets**, create a client secret and copy the value
 7. Note your **Application (client) ID** and **Directory (tenant) ID**
 

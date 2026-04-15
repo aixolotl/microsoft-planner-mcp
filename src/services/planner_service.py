@@ -24,8 +24,7 @@ from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
-
-from ..query_parameters import PlansGetQueryParameters
+from msgraph.generated.users.item.planner.plans.plans_request_builder import PlansRequestBuilder
 T = TypeVar("T")
 
 
@@ -84,7 +83,7 @@ class PlannerService:
     async def list_my_plans(self, select: list[str] | None = None) -> list[PlannerPlan]:
         """Return all plans accessible to the user, following pagination links."""
         request_configuration = RequestConfiguration(
-            query_parameters=PlansGetQueryParameters(select=select)
+            query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(select=select)
         )
 
         all_plans: list[PlannerPlan] = []
