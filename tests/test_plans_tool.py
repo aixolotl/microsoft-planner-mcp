@@ -43,13 +43,17 @@ def make_graph_client(plans: list[PlannerPlan] | None = None) -> MagicMock:
     return client
 
 
-@asynccontextmanager
-async def fake_for_user(graph_client: MagicMock):
-    """Helper that produces a for_user-compatible async context manager."""
-    async def _inner(token: str):
-        yield graph_client
+def make_capturing_client() -> tuple[MagicMock, list]:
+    """Returns (graph_client, captured_configs) where .get stores RequestConfigurations."""
+    captured: list = []
 
-    return _inner
+    async def capturing_get(request_configuration=None):
+        captured.append(request_configuration)
+        return make_plans_result([])
+
+    client = MagicMock()
+    client.me.planner.plans.get = capturing_get
+    return client, captured
 
 
 # ---------------------------------------------------------------------------
@@ -87,25 +91,10 @@ async def test_returns_plan_list():
 
 
 @pytest.mark.asyncio
-async def test_returns_empty_list_when_result_is_none():
+@pytest.mark.parametrize("get_return", [None, make_plans_result(None)], ids=["result-none", "value-none"])
+async def test_returns_empty_list_when_no_plans(get_return):
     graph_client = MagicMock()
-    graph_client.me.planner.plans.get = AsyncMock(return_value=None)
-
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
-        result = await list_my_plans()
-
-    assert result == []
-
-
-@pytest.mark.asyncio
-async def test_returns_empty_list_when_result_value_is_none():
-    graph_client = make_graph_client(plans=None)
+    graph_client.me.planner.plans.get = AsyncMock(return_value=get_return)
 
     @asynccontextmanager
     async def _for_user(token):
@@ -125,16 +114,13 @@ async def test_returns_empty_list_when_result_value_is_none():
 
 
 @pytest.mark.asyncio
-async def test_default_select_is_split_into_list():
-    """Default select="id,title,owner,details" must be passed as a list to the SDK."""
-    captured: list = []
-
-    async def capturing_get(request_configuration=None):
-        captured.append(request_configuration)
-        return make_plans_result([])
-
-    graph_client = MagicMock()
-    graph_client.me.planner.plans.get = capturing_get
+@pytest.mark.parametrize("select_arg,expected", [
+    ({"select": "id,title,owner,details"}, ["id", "title", "owner", "details"]),
+    ({"select": "id,title"}, ["id", "title"]),
+    ({}, ["id", "title", "owner", "details"]),  # default
+], ids=["explicit-csv", "custom-csv", "default"])
+async def test_select_is_split_into_list(select_arg, expected):
+    graph_client, captured = make_capturing_client()
 
     @asynccontextmanager
     async def _for_user(token):
@@ -143,23 +129,19 @@ async def test_default_select_is_split_into_list():
     with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
          patch("src.tools.plans.graph_client_manager") as mock_mgr:
         mock_mgr.for_user = _for_user
-        await list_my_plans()
+        await list_my_plans(**select_arg)
 
     assert len(captured) == 1
-    assert captured[0].query_parameters.select == ["id", "title", "owner", "details"]
+    assert captured[0].query_parameters.select == expected
 
 
 @pytest.mark.asyncio
-async def test_star_all_passes_no_select():
-    """select='*all' must result in no $select parameter (None)."""
-    captured: list = []
-
-    async def capturing_get(request_configuration=None):
-        captured.append(request_configuration)
-        return make_plans_result([])
-
-    graph_client = MagicMock()
-    graph_client.me.planner.plans.get = capturing_get
+@pytest.mark.parametrize("select_arg", [
+    {"select": "*all"},
+    {"select": None},
+], ids=["star-all", "explicit-none"])
+async def test_select_passes_none_when_all_fields(select_arg):
+    graph_client, captured = make_capturing_client()
 
     @asynccontextmanager
     async def _for_user(token):
@@ -168,62 +150,13 @@ async def test_star_all_passes_no_select():
     with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
          patch("src.tools.plans.graph_client_manager") as mock_mgr:
         mock_mgr.for_user = _for_user
-        await list_my_plans(select="*all")
-
-    assert captured[0].query_parameters.select is None
-
-
-@pytest.mark.asyncio
-async def test_custom_select_is_split_into_list():
-    """A custom comma-separated select string must be split into a list."""
-    captured: list = []
-
-    async def capturing_get(request_configuration=None):
-        captured.append(request_configuration)
-        return make_plans_result([])
-
-    graph_client = MagicMock()
-    graph_client.me.planner.plans.get = capturing_get
-
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
-        await list_my_plans(select="id,title")
-
-    assert captured[0].query_parameters.select == ["id", "title"]
-
-
-@pytest.mark.asyncio
-async def test_none_select_passes_no_select():
-    """Passing select=None explicitly must result in no $select parameter."""
-    captured: list = []
-
-    async def capturing_get(request_configuration=None):
-        captured.append(request_configuration)
-        return make_plans_result([])
-
-    graph_client = MagicMock()
-    graph_client.me.planner.plans.get = capturing_get
-
-    @asynccontextmanager
-    async def _for_user(token):
-        yield graph_client
-
-    with patch("src.tools.plans.get_access_token", return_value=make_access_token()), \
-         patch("src.tools.plans.graph_client_manager") as mock_mgr:
-        mock_mgr.for_user = _for_user
-        await list_my_plans(select=None)
+        await list_my_plans(**select_arg)
 
     assert captured[0].query_parameters.select is None
 
 
 @pytest.mark.asyncio
 async def test_obo_token_is_forwarded_to_for_user():
-    """The raw token string from get_access_token must be passed to for_user."""
     received_tokens: list[str] = []
 
     @asynccontextmanager
