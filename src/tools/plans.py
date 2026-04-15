@@ -95,8 +95,12 @@ async def create_task(
     if token is None:
         raise AuthorizationError("No access token available")
 
-    start_dt = datetime.fromisoformat(start_date_time).replace(tzinfo=timezone.utc) if start_date_time else None
-    due_dt = datetime.fromisoformat(due_date_time).replace(tzinfo=timezone.utc) if due_date_time else None
+    def _to_utc(s: str) -> datetime:
+        dt = datetime.fromisoformat(s)
+        return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+
+    start_dt = _to_utc(start_date_time) if start_date_time else None
+    due_dt = _to_utc(due_date_time) if due_date_time else None
     if start_dt and due_dt and start_dt > due_dt:
         raise ValueError(f"start_date_time ({start_date_time}) must not be after due_date_time ({due_date_time})")
 
@@ -114,8 +118,8 @@ async def create_task(
         body.assignments = PlannerAssignments(
             additional_data={
                 user_id: {
-                    "@odata_type": "#microsoft.graph.plannerAssignment",
-                    "order_hint": " !",
+                    "@odata.type": "#microsoft.graph.plannerAssignment",
+                    "orderHint": " !",
                 }
                 for user_id in assign_user_ids
             }

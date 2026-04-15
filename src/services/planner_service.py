@@ -66,14 +66,14 @@ class PlannerService:
             raise ValueError(f"No @odata.etag found on task details {task_id!r}")
         return etag
 
-    async def _with_retry(self, task_id: str, etag: str, operation: Callable[[str], Awaitable[T]]) -> T:
+    async def _with_retry(self, etag: str, operation: Callable[[str], Awaitable[T]], refresh: Callable[[], Awaitable[str]]) -> T:
         """Run ``operation(etag)``, retrying once with a fresh ETag on 412/409."""
         try:
             return await operation(etag)
         except ODataError as exc:
             if exc.response_status_code not in (409, 412):
                 raise
-            return await operation(await self._refresh_task_etag(task_id))
+            return await operation(await refresh())
 
     # ------------------------------------------------------------------
     # Public API
@@ -88,16 +88,18 @@ class PlannerService:
         """PATCH a task.  Retries once with a fresh ETag on 412/409."""
         item = self._client.planner.tasks.by_planner_task_id(task_id)
         return await self._with_retry(
-            task_id, etag,
+            etag,
             lambda e: item.patch(body, request_configuration=self._make_config(e, prefer_representation=True)),
+            lambda: self._refresh_task_etag(task_id),
         )
 
     async def delete_task(self, task_id: str, etag: str) -> None:
         """DELETE a task.  Retries once with a fresh ETag on 412/409."""
         item = self._client.planner.tasks.by_planner_task_id(task_id)
         await self._with_retry(
-            task_id, etag,
+            etag,
             lambda e: item.delete(request_configuration=self._make_config(e)),
+            lambda: self._refresh_task_etag(task_id),
         )
 
     async def patch_task_details(
@@ -108,10 +110,8 @@ class PlannerService:
     ) -> PlannerTaskDetails | None:
         """PATCH task details.  Retries once with a fresh ETag on 412/409."""
         item = self._client.planner.tasks.by_planner_task_id(task_id).details
-        try:
-            return await item.patch(body, request_configuration=self._make_config(etag, prefer_representation=True))
-        except ODataError as exc:
-            if exc.response_status_code not in (409, 412):
-                raise
-            fresh_etag = await self._refresh_details_etag(task_id)
-            return await item.patch(body, request_configuration=self._make_config(fresh_etag, prefer_representation=True))
+        return await self._with_retry(
+            etag,
+            lambda e: item.patch(body, request_configuration=self._make_config(e, prefer_representation=True)),
+            lambda: self._refresh_details_etag(task_id),
+        )
