@@ -11,6 +11,5 @@ auth = AzureProvider(
     additional_authorize_scopes=[
         "https://graph.microsoft.com/Tasks.ReadWrite",
         "https://graph.microsoft.com/User.Read",
-        "https://graph.microsoft.com/Group.Read.All",
     ],
 )
