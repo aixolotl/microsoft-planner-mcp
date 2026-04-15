@@ -1,35 +1,38 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
+from msgraph.generated.models.o_data_errors.o_data_error import ODataError
+from msgraph.generated.models.planner_assignments import PlannerAssignments
 from msgraph.generated.models.planner_plan import PlannerPlan
+from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.users.item.planner.plans.plans_request_builder import PlansRequestBuilder
 
 from ..graph_client_manager import graph_client_manager
 
 plans_router = FastMCP("plans")
 
-# List all Planner plans accessible to the authenticated user.
-#  Returns basic plans only — Premium plans are not accessible via this endpoint.
-#  Requires the Tasks.Read delegated permission.
+
 @plans_router.tool(name="list_my_plans", annotations={"readOnlyHint": True})
 async def list_my_plans(
     select: str | None = "id,title,owner,details",
-) -> list[PlannerPlan]:
+) -> list[PlannerPlan] | None:
     """List all Planner plans accessible to the authenticated user.
 
     Args:
-        select: Comma-separated list of PlannerPlan properties to include in the response. Default is "id,title,owner,details", pass "*all" for all fields.
+        select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,details". Pass "*all" for all fields.
 
     Returns:
-        A list of PlannerPlan objects.
+        A list of PlannerPlan objects, or None if the user has no plans.
     """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
-    
+
     if select == "*all":
         select = None  # No need to specify $select if we want all fields
 
@@ -41,4 +44,89 @@ async def list_my_plans(
     async with graph_client_manager.for_user(token.token) as graph_client:
         result = await graph_client.me.planner.plans.get(request_configuration=request_configuration)
 
-    return result.value if result and result.value else []
+    return result.value if result else None
+
+
+@plans_router.tool(name="list_tasks", annotations={"readOnlyHint": True})
+async def list_tasks(plan_id: str) -> list[PlannerTask] | None:
+    """List all tasks in a Planner plan.
+
+    Args:
+        plan_id: The ID of the plan to list tasks for (from list_my_plans or list_group_plans).
+
+    Returns:
+        A list of PlannerTask objects in the plan, or None if the plan has no tasks.
+    """
+    token = get_access_token()
+    if token is None:
+        raise AuthorizationError("No access token available")
+
+    async with graph_client_manager.for_user(token.token) as graph_client:
+        result = await graph_client.planner.plans.by_planner_plan_id(plan_id).tasks.get()
+
+    return result.value if result else None
+
+
+@plans_router.tool(name="create_task")
+async def create_task(
+    plan_id: str,
+    bucket_id: str,
+    title: str,
+    start_date_time: str | None = None,
+    due_date_time: str | None = None,
+    percent_complete: int | None = None,
+    assign_user_ids: list[str] | None = None,
+) -> PlannerTask | None:
+    """Create a new task in a Planner plan.
+
+    Args:
+        plan_id: The ID of the plan to create the task in.
+        bucket_id: The ID of the bucket to place the task in (from list_buckets).
+        title: The title of the task.
+        start_date_time: Optional ISO 8601 start date (e.g. "2026-05-01T00:00:00"). Must not be after due_date_time.
+        due_date_time: Optional ISO 8601 due date (e.g. "2026-05-31T00:00:00").
+        percent_complete: Optional completion percentage (0–100).
+        assign_user_ids: Optional list of user object IDs to assign to the task.
+
+    Returns:
+        The created PlannerTask object.
+    """
+    token = get_access_token()
+    if token is None:
+        raise AuthorizationError("No access token available")
+
+    start_dt = datetime.fromisoformat(start_date_time).replace(tzinfo=timezone.utc) if start_date_time else None
+    due_dt = datetime.fromisoformat(due_date_time).replace(tzinfo=timezone.utc) if due_date_time else None
+    if start_dt and due_dt and start_dt > due_dt:
+        raise ValueError(f"start_date_time ({start_date_time}) must not be after due_date_time ({due_date_time})")
+
+    body = PlannerTask()
+    body.plan_id = plan_id
+    body.bucket_id = bucket_id
+    body.title = title
+    if start_dt is not None:
+        body.start_date_time = start_dt
+    if due_dt is not None:
+        body.due_date_time = due_dt
+    if percent_complete is not None:
+        body.percent_complete = percent_complete
+    if assign_user_ids:
+        body.assignments = PlannerAssignments(
+            additional_data={
+                user_id: {
+                    "@odata_type": "#microsoft.graph.plannerAssignment",
+                    "order_hint": " !",
+                }
+                for user_id in assign_user_ids
+            }
+        )
+
+    async with graph_client_manager.for_user(token.token) as graph_client:
+        try:
+            return await graph_client.planner.tasks.post(body)
+        except ODataError as exc:
+            if exc.response_status_code != 403:
+                raise
+            code = exc.error.code if exc.error else None
+            msg = exc.error.message if exc.error else exc.primary_message
+            raise ValueError(f"Cannot create task ({code}): {msg}") from exc

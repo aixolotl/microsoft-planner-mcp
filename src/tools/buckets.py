@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from fastmcp import FastMCP
+from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from msgraph.generated.models.planner_bucket import PlannerBucket
 
@@ -9,18 +10,21 @@ from ..graph_client_manager import graph_client_manager
 buckets_router = FastMCP("buckets")
 
 
-@buckets_router.tool(name="list-buckets", annotations={"readOnlyHint": True})
-async def list_buckets(plan_id: str) -> list[PlannerBucket]:
+@buckets_router.tool(name="list_buckets", annotations={"readOnlyHint": True})
+async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
     """List all buckets in a Planner plan.
 
-    Requires the Tasks.Read delegated permission.
+    Args:
+        plan_id: The ID of the plan to list buckets for (from list_my_plans or list_group_plans).
+
+    Returns:
+        A list of PlannerBucket objects, or None if the plan has no buckets.
     """
     token = get_access_token()
     if token is None:
-        raise ValueError("No access token available")
+        raise AuthorizationError("No access token available")
 
-    graph_client = graph_client_manager.for_user(token.token)
-    result = await graph_client.planner.plans.by_planner_plan_id(plan_id).buckets.get()
+    async with graph_client_manager.for_user(token.token) as graph_client:
+        result = await graph_client.planner.plans.by_planner_plan_id(plan_id).buckets.get()
 
-    buckets = result.value if result and result.value else []
-    return sorted(buckets, key=lambda b: b.order_hint or "")
+    return result.value if result else None

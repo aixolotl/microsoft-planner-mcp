@@ -9,7 +9,11 @@ me_router = FastMCP("me")
 
 @me_router.tool(name="get_me", annotations={"readOnlyHint": True})
 async def get_me() -> User | None:
-    """Return the authenticated user's identity, verified via Microsoft Graph."""
+    """Return the authenticated user's profile from Microsoft Graph.
+
+    Returns:
+        The authenticated user's identity as a User object.
+    """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
