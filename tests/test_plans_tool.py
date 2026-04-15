@@ -152,6 +152,7 @@ async def test_select_passes_none_when_all_fields(select_arg):
         mock_mgr.for_user = _for_user
         await list_my_plans(**select_arg)
 
+    assert len(captured) == 1
     assert captured[0].query_parameters.select is None
 
 
