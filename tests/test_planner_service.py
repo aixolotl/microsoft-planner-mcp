@@ -160,10 +160,10 @@ async def test_delete_task_success():
     client.planner.tasks.by_planner_task_id.return_value.delete.assert_awaited_once()
 
 
-async def test_delete_task_retries_on_412(make_odata_error):
-    """Confirms delete_task is wired through _with_retry; 412/409 branch proven by patch tests."""
+@pytest.mark.parametrize("status", [412, 409], ids=["412", "409"])
+async def test_delete_task_retries_on_conflict(status, make_odata_error):
     client = make_graph_client(
-        delete_side_effect=[make_odata_error(412), None],
+        delete_side_effect=[make_odata_error(status), None],
         get_task=make_task('"etag-fresh"'),
     )
 
@@ -249,3 +249,65 @@ async def test_patch_task_details_non_retryable_raises(status, code, make_odata_
     assert exc_info.value.response_status_code == status
     assert exc_info.value.error is not None
     assert exc_info.value.error.code == code
+
+
+# ---------------------------------------------------------------------------
+# delete_plan / delete_bucket (shared retry logic)
+# ---------------------------------------------------------------------------
+
+
+def make_plan_client(*, delete_side_effect: Exception | list | None = None) -> tuple[MagicMock, MagicMock]:
+    from msgraph.generated.models.planner_plan import PlannerPlan
+    plan = PlannerPlan()
+    plan.additional_data = {"@odata.etag": '"plan-etag-fresh"'}
+    item = MagicMock()
+    item.delete = AsyncMock(side_effect=delete_side_effect)
+    item.get = AsyncMock(return_value=plan)
+    client = MagicMock()
+    client.planner.plans.by_planner_plan_id.return_value = item
+    return client, item
+
+
+def make_bucket_client(*, delete_side_effect: Exception | list | None = None) -> tuple[MagicMock, MagicMock]:
+    from msgraph.generated.models.planner_bucket import PlannerBucket
+    bucket = PlannerBucket()
+    bucket.additional_data = {"@odata.etag": '"bucket-etag-fresh"'}
+    item = MagicMock()
+    item.delete = AsyncMock(side_effect=delete_side_effect)
+    item.get = AsyncMock(return_value=bucket)
+    client = MagicMock()
+    client.planner.buckets.by_planner_bucket_id.return_value = item
+    return client, item
+
+
+@pytest.mark.parametrize("factory,svc_method", [
+    (make_plan_client, "delete_plan"),
+    (make_bucket_client, "delete_bucket"),
+], ids=["plan", "bucket"])
+async def test_delete_resource_success(factory, svc_method):
+    client, item = factory()
+    await getattr(PlannerService(client), svc_method)("res-1", '"etag-v1"')
+    item.delete.assert_awaited_once()
+
+
+@pytest.mark.parametrize("factory,svc_method", [
+    (make_plan_client, "delete_plan"),
+    (make_bucket_client, "delete_bucket"),
+], ids=["plan", "bucket"])
+@pytest.mark.parametrize("status", [412, 409], ids=["412", "409"])
+async def test_delete_resource_retries_on_conflict(factory, svc_method, status, make_odata_error):
+    client, item = factory(delete_side_effect=[make_odata_error(status), None])
+    await getattr(PlannerService(client), svc_method)("res-1", '"etag-stale"')
+    item.get.assert_awaited_once()
+    assert item.delete.await_count == 2
+
+
+@pytest.mark.parametrize("factory,svc_method", [
+    (make_plan_client, "delete_plan"),
+    (make_bucket_client, "delete_bucket"),
+], ids=["plan", "bucket"])
+async def test_delete_resource_non_retryable_raises(factory, svc_method, make_odata_error):
+    client, _ = factory(delete_side_effect=make_odata_error(403, "Forbidden", "No access"))
+    with pytest.raises(ODataError) as exc_info:
+        await getattr(PlannerService(client), svc_method)("res-1", '"etag-v1"')
+    assert exc_info.value.response_status_code == 403

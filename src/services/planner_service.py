@@ -113,6 +113,22 @@ class PlannerService:
             raise ValueError(f"No @odata.etag found on task details {task_id!r}")
         return etag
 
+    async def _refresh_plan_etag(self, plan_id: str) -> str:
+        """GET the plan and return the current @odata.etag value."""
+        plan = await self._client.planner.plans.by_planner_plan_id(plan_id).get()
+        etag: str | None = plan.additional_data.get("@odata.etag") if plan else None
+        if not etag:
+            raise ValueError(f"No @odata.etag found on plan {plan_id!r}")
+        return etag
+
+    async def _refresh_bucket_etag(self, bucket_id: str) -> str:
+        """GET the bucket and return the current @odata.etag value."""
+        bucket = await self._client.planner.buckets.by_planner_bucket_id(bucket_id).get()
+        etag: str | None = bucket.additional_data.get("@odata.etag") if bucket else None
+        if not etag:
+            raise ValueError(f"No @odata.etag found on bucket {bucket_id!r}")
+        return etag
+
     async def _with_retry(self, etag: str, operation: Callable[[str], Awaitable[T]], refresh: Callable[[], Awaitable[str]]) -> T:
         """Run ``operation(etag)``, retrying once with a fresh ETag on 412/409."""
         try:
@@ -169,4 +185,22 @@ class PlannerService:
             etag,
             lambda e: item.patch(body, request_configuration=self._make_config(e, prefer_representation=True)),
             lambda: self._refresh_details_etag(task_id),
+        )
+
+    async def delete_plan(self, plan_id: str, etag: str) -> None:
+        """DELETE a plan.  Retries once with a fresh ETag on 412/409."""
+        item = self._client.planner.plans.by_planner_plan_id(plan_id)
+        await self._with_retry(
+            etag,
+            lambda e: item.delete(request_configuration=self._make_config(e)),
+            lambda: self._refresh_plan_etag(plan_id),
+        )
+
+    async def delete_bucket(self, bucket_id: str, etag: str) -> None:
+        """DELETE a bucket.  Retries once with a fresh ETag on 412/409."""
+        item = self._client.planner.buckets.by_planner_bucket_id(bucket_id)
+        await self._with_retry(
+            etag,
+            lambda e: item.delete(request_configuration=self._make_config(e)),
+            lambda: self._refresh_bucket_etag(bucket_id),
         )

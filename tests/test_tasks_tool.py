@@ -150,30 +150,17 @@ async def test_list_my_tasks_forwards_obo_token(token_capturing_ctx):
 
 @pytest.mark.parametrize("select_arg,expected", [
     ({"select": "id,title,planId"}, ["id", "title", "planId"]),
-    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),  # default
-], ids=["custom-csv", "default"])
-async def test_list_my_tasks_select_is_split_into_list(select_arg, expected, graph_ctx):
+    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),
+    ({"select": "*all"}, None),
+    ({"select": None}, None),
+], ids=["custom-csv", "default", "star-all", "explicit-none"])
+async def test_list_my_tasks_select(select_arg, expected, graph_ctx):
     graph_client, captured = make_capturing_client()
 
     with graph_ctx(MODULE, graph_client):
         await list_my_tasks(**select_arg)
 
-    assert len(captured) == 1
     assert captured[0].query_parameters.select == expected
-
-
-@pytest.mark.parametrize("select_arg", [
-    {"select": "*all"},
-    {"select": None},
-], ids=["star-all", "explicit-none"])
-async def test_list_my_tasks_select_passes_none_when_all_fields(select_arg, graph_ctx):
-    graph_client, captured = make_capturing_client()
-
-    with graph_ctx(MODULE, graph_client):
-        await list_my_tasks(**select_arg)
-
-    assert len(captured) == 1
-    assert captured[0].query_parameters.select is None
 
 
 # ---------------------------------------------------------------------------
@@ -311,22 +298,21 @@ async def test_update_task_details_sets_checklist_and_references(graph_ctx):
     assert body.references.additional_data == refs
 
 
-async def test_update_task_details_403_raises_value_error(graph_ctx, make_odata_error):
-    svc = make_patch_svc(side_effect=make_odata_error(403, "MaximumChecklistItemsOnTask", "Too many items"))
+@pytest.mark.parametrize("status,code,exc_type", [
+    (403, "MaximumChecklistItemsOnTask", ValueError),
+    (400, "BadRequest", ODataError),
+], ids=["403-value-error", "400-reraises"])
+async def test_update_task_details_odata_error(status, code, exc_type, graph_ctx, make_odata_error):
+    svc = make_patch_svc(side_effect=make_odata_error(status, code))
 
     with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
-        with pytest.raises(ValueError, match="MaximumChecklistItemsOnTask"):
+        with pytest.raises(exc_type) as exc_info:
             await update_task_details("task-1", '"etag-v1"', description="x")
 
-
-async def test_update_task_details_non_403_odata_error_reraises(graph_ctx, make_odata_error):
-    svc = make_patch_svc(side_effect=make_odata_error(400, "BadRequest"))
-
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
-        with pytest.raises(ODataError) as exc_info:
-            await update_task_details("task-1", '"etag-v1"', description="x")
-
-    assert exc_info.value.response_status_code == 400
+    if exc_type is ValueError:
+        assert code in str(exc_info.value)
+    else:
+        assert exc_info.value.response_status_code == status
 
 
 # ---------------------------------------------------------------------------
@@ -338,17 +324,9 @@ async def test_delete_task_delegates_to_service(graph_ctx):
     svc = make_patch_svc()
 
     with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
-        await delete_task("task-1", '"etag-v1"')
-
-    svc.delete_task.assert_awaited_once_with("task-1", '"etag-v1"')
-
-
-async def test_delete_task_returns_none(graph_ctx):
-    svc = make_patch_svc()
-
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
         result = await delete_task("task-1", '"etag-v1"')
 
+    svc.delete_task.assert_awaited_once_with("task-1", '"etag-v1"')
     assert result is None
 
 
@@ -384,30 +362,17 @@ async def test_list_tasks_returns_none_when_empty(get_return, graph_ctx):
 
 @pytest.mark.parametrize("select_arg,expected", [
     ({"select": "id,title"}, ["id", "title"]),
-    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),  # default
-], ids=["custom-csv", "default"])
-async def test_list_tasks_select_is_split_into_list(select_arg, expected, graph_ctx):
+    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),
+    ({"select": "*all"}, None),
+    ({"select": None}, None),
+], ids=["custom-csv", "default", "star-all", "explicit-none"])
+async def test_list_tasks_select(select_arg, expected, graph_ctx):
     graph_client, captured = make_plan_capturing_client()
 
     with graph_ctx(MODULE, graph_client):
         await list_tasks("plan-1", **select_arg)
 
-    assert len(captured) == 1
     assert captured[0].query_parameters.select == expected
-
-
-@pytest.mark.parametrize("select_arg", [
-    {"select": "*all"},
-    {"select": None},
-], ids=["star-all", "explicit-none"])
-async def test_list_tasks_select_passes_none_when_all_fields(select_arg, graph_ctx):
-    graph_client, captured = make_plan_capturing_client()
-
-    with graph_ctx(MODULE, graph_client):
-        await list_tasks("plan-1", **select_arg)
-
-    assert len(captured) == 1
-    assert captured[0].query_parameters.select is None
 
 
 # ---------------------------------------------------------------------------
@@ -430,34 +395,21 @@ async def test_create_task_returns_created_task(graph_ctx):
     assert body.title == "My Task"
 
 
-@pytest.mark.parametrize("due_str,expected_utc", [
-    ("2026-05-31T00:00:00", datetime(2026, 5, 31, 0, 0, 0, tzinfo=timezone.utc)),
-    ("2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
-], ids=["naive-utc-due-date", "offset-due-date-converted-to-utc"])
-async def test_create_task_converts_due_date_to_utc(due_str, expected_utc, graph_ctx):
+@pytest.mark.parametrize("kwarg,dt_str,expected_utc", [
+    ("due_date_time",  "2026-05-31T00:00:00",       datetime(2026, 5, 31, 0,  0, 0, tzinfo=timezone.utc)),
+    ("due_date_time",  "2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
+    ("start_date_time", "2026-05-01T00:00:00",       datetime(2026, 5,  1, 0,  0, 0, tzinfo=timezone.utc)),
+    ("start_date_time", "2026-05-01T06:00:00+06:00", datetime(2026, 5,  1, 0,  0, 0, tzinfo=timezone.utc)),
+], ids=["due-naive", "due-offset", "start-naive", "start-offset"])
+async def test_create_task_converts_date_to_utc(kwarg, dt_str, expected_utc, graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
 
     with graph_ctx(MODULE, graph_client):
-        await create_task("plan-1", "bucket-1", "Task", due_date_time=due_str)
+        await create_task("plan-1", "bucket-1", "Task", **{kwarg: dt_str})
 
     body = graph_client.planner.tasks.post.call_args.args[0]
-    assert body.due_date_time == expected_utc
-
-
-@pytest.mark.parametrize("start_str,expected_utc", [
-    ("2026-05-01T00:00:00", datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)),
-    ("2026-05-01T06:00:00+06:00", datetime(2026, 5, 1, 0, 0, 0, tzinfo=timezone.utc)),
-], ids=["naive-utc-start-date", "offset-start-date-converted-to-utc"])
-async def test_create_task_converts_start_date_to_utc(start_str, expected_utc, graph_ctx):
-    graph_client = MagicMock()
-    graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
-
-    with graph_ctx(MODULE, graph_client):
-        await create_task("plan-1", "bucket-1", "Task", start_date_time=start_str)
-
-    body = graph_client.planner.tasks.post.call_args.args[0]
-    assert body.start_date_time == expected_utc
+    assert getattr(body, kwarg) == expected_utc
 
 
 async def test_create_task_raises_when_start_after_due(graph_ctx):
@@ -499,21 +451,19 @@ async def test_create_task_sets_optional_fields(graph_ctx):
     assert body.percent_complete == 50
 
 
-async def test_create_task_403_raises_value_error(graph_ctx, make_odata_error):
+@pytest.mark.parametrize("status,code,exc_type", [
+    (403, "MaximumTasksInProject", ValueError),
+    (400, "BadRequest", ODataError),
+], ids=["403-value-error", "400-reraises"])
+async def test_create_task_odata_error(status, code, exc_type, graph_ctx, make_odata_error):
     graph_client = MagicMock()
-    graph_client.planner.tasks.post = AsyncMock(side_effect=make_odata_error(403, "MaximumTasksInProject"))
+    graph_client.planner.tasks.post = AsyncMock(side_effect=make_odata_error(status, code))
 
     with graph_ctx(MODULE, graph_client):
-        with pytest.raises(ValueError, match="MaximumTasksInProject"):
+        with pytest.raises(exc_type) as exc_info:
             await create_task("plan-1", "bucket-1", "Task")
 
-
-async def test_create_task_non_403_odata_error_reraises(graph_ctx, make_odata_error):
-    graph_client = MagicMock()
-    graph_client.planner.tasks.post = AsyncMock(side_effect=make_odata_error(400, "BadRequest"))
-
-    with graph_ctx(MODULE, graph_client):
-        with pytest.raises(ODataError) as exc_info:
-            await create_task("plan-1", "bucket-1", "Task")
-
-    assert exc_info.value.response_status_code == 400
+    if exc_type is ValueError:
+        assert code in str(exc_info.value)
+    else:
+        assert exc_info.value.response_status_code == status

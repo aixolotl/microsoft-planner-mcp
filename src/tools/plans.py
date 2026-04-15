@@ -109,3 +109,59 @@ async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
         await ctx.info(f"Found {len(plans)} plan(s) in group {group_id}")
 
     return plans or None
+
+
+@plans_router.tool(name="create_plan")
+async def create_plan(group_id: str, title: str) -> PlannerPlan | None:
+    """Create a new Planner plan for a Microsoft 365 group.
+
+    Args:
+        group_id: The object ID of the M365 group that will own the plan (e.g. from list_group_plans or Teams).
+        title: The display title for the new plan.
+
+    Returns:
+        The created PlannerPlan object.
+    """
+    token = get_access_token()
+    if token is None:
+        raise AuthorizationError("No access token available")
+
+    ctx = get_optional_context()
+
+    if ctx is not None:
+        await ctx.info(f"Creating plan '{title}' for group {group_id}")
+
+    body = PlannerPlan()
+    body.owner = group_id
+    body.title = title
+
+    async with graph_client_manager.for_user(token.token) as graph_client:
+        try:
+            return await graph_client.planner.plans.post(body)
+        except ODataError as exc:
+            # 403 here typically means the user is not a member of the group or
+            # the group does not have a licence for Planner. Convert to a clear
+            # ValueError so the LLM receives a readable explanation instead of a
+            # raw ODataError stack trace.
+            if exc.response_status_code != 403:
+                raise
+            code = exc.error.code if exc.error else None
+            msg = exc.error.message if exc.error else exc.primary_message
+            raise ValueError(f"Cannot create plan ({code}): {msg}") from exc
+
+
+@plans_router.tool(name="delete_plan")
+async def delete_plan(plan_id: str, etag: str) -> None:
+    """Delete a Planner plan.
+
+    Args:
+        plan_id: The ID of the plan to delete (from list_my_plans or list_group_plans).
+        etag: The current @odata.etag of the plan. Retries once automatically if stale (412/409).
+    """
+    token = get_access_token()
+    if token is None:
+        raise AuthorizationError("No access token available")
+
+    async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
+        await svc.delete_plan(plan_id, etag)

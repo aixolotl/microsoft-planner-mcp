@@ -13,9 +13,14 @@ Every capability is exposed as an [MCP tool](https://gofastmcp.com/servers/tools
 | Tool | Description |
 |---|---|
 | `get_me` | Fetch the authenticated user's Graph profile |
+| `list_my_groups` | List all Microsoft 365 groups the user is a member of |
 | `list_my_plans` | List all Planner plans the user is a member of |
 | `list_group_plans` | List plans belonging to a specific Microsoft 365 group |
+| `create_plan` | Create a new Planner plan for a Microsoft 365 group |
+| `delete_plan` | Delete a plan by ID and ETag |
 | `list_buckets` | List buckets within a plan |
+| `create_bucket` | Create a new bucket in a plan |
+| `delete_bucket` | Delete a bucket by ID and ETag |
 | `list_my_tasks` | List tasks assigned to the authenticated user |
 | `list_tasks` | List all tasks in a plan |
 | `get_task_details` | Get checklist, description, and references for a task |
@@ -28,10 +33,11 @@ Read-only tools carry `readOnlyHint: true` [annotations](https://gofastmcp.com/s
 
 ### Server Composition
 
-Tools are split into four domain routers (`me`, `plans`, `tasks`, `buckets`) each created as a standalone `FastMCP` instance and [mounted](https://gofastmcp.com/servers/composition) on the main app:
+Tools are split into five domain routers (`me`, `groups`, `plans`, `tasks`, `buckets`) each created as a standalone `FastMCP` instance and [mounted](https://gofastmcp.com/servers/composition) on the main app:
 
 ```python
 mcp.mount(me_router)
+mcp.mount(groups_router)
 mcp.mount(plans_router)
 mcp.mount(tasks_router)
 mcp.mount(buckets_router)
@@ -61,15 +67,16 @@ Five [built-in middleware](https://gofastmcp.com/servers/middleware#built-in-mid
 
 ### Client Logging
 
-Every read tool accepts an optional [`ctx: Context`](https://gofastmcp.com/servers/logging) parameter and sends real-time progress messages to the MCP client:
+Every tool uses [`get_optional_context()`](https://gofastmcp.com/servers/context#via-get_context-function) to send real-time progress messages to the MCP client:
 
 ```python
 @plans_router.tool(name="list_my_plans")
-async def list_my_plans(..., ctx: Context | None = None):
-    if ctx:
+async def list_my_plans(...):
+    ctx = get_optional_context()
+    if ctx is not None:
         await ctx.info("Fetching plans from Microsoft Graph...")
     plans = await service.list_my_plans(...)
-    if ctx:
+    if ctx is not None:
         await ctx.info(f"Found {len(plans)} plan(s).")
     return plans
 ```

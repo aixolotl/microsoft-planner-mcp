@@ -24,6 +24,7 @@ from starlette.responses import JSONResponse, RedirectResponse
 from .auth_provider import auth
 from .config import settings
 from .tools.buckets import buckets_router
+from .tools.groups import groups_router
 from .tools.me import me_router
 from .tools.plans import plans_router
 from .tools.tasks import tasks_router
@@ -95,6 +96,7 @@ mcp.add_middleware(StructuredLoggingMiddleware())
 mcp.add_middleware(ResponseLimitingMiddleware(max_size=500_000))
 
 mcp.mount(me_router)
+mcp.mount(groups_router)
 mcp.mount(plans_router)
 mcp.mount(tasks_router)
 mcp.mount(buckets_router)
