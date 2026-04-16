@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
@@ -16,16 +18,15 @@ buckets_router = FastMCP("buckets")
 # readOnlyHint=True signals to the MCP client that this tool never mutates
 # state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
-@buckets_router.tool(name="list_buckets", annotations={"readOnlyHint": True})
-async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
-    """List all buckets in a Planner plan.
-
-    Args:
-        plan_id: The ID of the plan to list buckets for (from list_my_plans or list_group_plans).
-
-    Returns:
-        A list of PlannerBucket objects, or None if the plan has no buckets.
-    """
+@buckets_router.tool(
+    name="list_buckets",
+    description="List all buckets in a Planner plan.",
+    tags={"buckets", "read"},
+    annotations={"readOnlyHint": True},
+)
+async def list_buckets(
+    plan_id: Annotated[str, "The ID of the plan to list buckets for (from list_my_plans or list_group_plans)."],
+) -> list[PlannerBucket] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -50,17 +51,15 @@ async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
     return buckets or None
 
 
-@buckets_router.tool(name="create_bucket")
-async def create_bucket(plan_id: str, name: str) -> PlannerBucket | None:
-    """Create a new bucket in a Planner plan.
-
-    Args:
-        plan_id: The ID of the plan to create the bucket in (from list_my_plans or list_group_plans).
-        name: The display name for the new bucket.
-
-    Returns:
-        The created PlannerBucket object.
-    """
+@buckets_router.tool(
+    name="create_bucket",
+    description="Create a new bucket in a Planner plan.",
+    tags={"buckets", "write"},
+)
+async def create_bucket(
+    plan_id: Annotated[str, "The ID of the plan to create the bucket in (from list_my_plans or list_group_plans)."],
+    name: Annotated[str, "The display name for the new bucket."],
+) -> PlannerBucket | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -91,14 +90,16 @@ async def create_bucket(plan_id: str, name: str) -> PlannerBucket | None:
             raise ValueError(f"Cannot create bucket ({code}): {msg}") from exc
 
 
-@buckets_router.tool(name="delete_bucket")
-async def delete_bucket(bucket_id: str, etag: str) -> None:
-    """Delete a Planner bucket.
-
-    Args:
-        bucket_id: The ID of the bucket to delete (from list_buckets).
-        etag: The current @odata.etag of the bucket. Retries once automatically if stale (412/409).
-    """
+@buckets_router.tool(
+    name="delete_bucket",
+    description="Delete a Planner bucket.",
+    tags={"buckets", "write"},
+    annotations={"destructiveHint": True},
+)
+async def delete_bucket(
+    bucket_id: Annotated[str, "The ID of the bucket to delete (from list_buckets)."],
+    etag: Annotated[str, "The current @odata.etag of the bucket. Retries once automatically if stale (412/409)."],
+) -> None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")

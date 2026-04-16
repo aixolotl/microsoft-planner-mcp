@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.group import Group
-from msgraph.generated.groups.groups_request_builder import GroupsRequestBuilder
 from msgraph.generated.users.item.transitive_member_of.graph_group.graph_group_request_builder import GraphGroupRequestBuilder
 
 from ..deps import get_optional_context
@@ -15,23 +16,17 @@ from ..services.planner_service import PlannerService
 groups_router = FastMCP("groups")
 
 
-@groups_router.tool(name="list_my_groups", annotations={"readOnlyHint": True})
+@groups_router.tool(
+    name="list_my_groups",
+    description="List all Microsoft 365 groups the authenticated user is a member of.",
+    tags={"groups", "read"},
+    annotations={"readOnlyHint": True},
+)
 async def list_my_groups(
-    select: str | None = "id,displayName,mail",
-    filter: str | None = None,
-    expand: str | None = None,
+    select: Annotated[str | None, "Comma-separated list of Group fields to include. Pass '*all' for all fields."] = "id,displayName,mail",
+    filter: Annotated[str | None, "OData filter string, e.g. \"startsWith(displayName,'Project')\"."] = None,
+    expand: Annotated[str | None, "Comma-separated related entities to expand, e.g. \"members($select=id,displayName)\"."] = None,
 ) -> list[Group] | None:
-    """List all Microsoft 365 groups the authenticated user is a member of.
-    
-    Args:
-        select: Comma-separated list of Group fields to include. Default is "id,displayName,mail". Pass "*all" for all fields.
-        filter: OData filter string to filter groups, e.g. "startsWith(displayName,'Project')". Use OData filter syntax.
-        expand: Comma-separated list of related entities to expand. Use OData expand syntax, e.g. "members($select=id,displayName)".
-
-    Returns:
-        A list of Group objects, or None if the user belongs to no groups.
-        Each group's id field can be used as the group_id for list_group_plans and create_plan.
-    """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")

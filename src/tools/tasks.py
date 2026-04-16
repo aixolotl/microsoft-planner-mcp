@@ -33,18 +33,15 @@ tasks_router = FastMCP("tasks")
 # readOnlyHint=True signals to MCP clients that this tool never mutates state,
 # allowing them to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
-@tasks_router.tool(name="list_my_tasks", annotations={"readOnlyHint": True})
+@tasks_router.tool(
+    name="list_my_tasks",
+    description="List all Planner tasks assigned to the authenticated user across all plans.",
+    tags={"tasks", "read"},
+    annotations={"readOnlyHint": True},
+)
 async def list_my_tasks(
-    select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
+    select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
 ) -> list[PlannerTask] | None:
-    """List all Planner tasks assigned to the authenticated user across all plans.
-
-    Args:
-        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,dueDateTime,assignments". Pass "*all" for all fields.
-
-    Returns:
-        A list of PlannerTask objects assigned to the user, or None if there are no tasks.
-    """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -86,20 +83,16 @@ async def list_my_tasks(
 
 # readOnlyHint=True: this tool only reads from Graph, never writes.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
-@tasks_router.tool(name="list_tasks", annotations={"readOnlyHint": True})
+@tasks_router.tool(
+    name="list_tasks",
+    description="List all tasks in a Planner plan.",
+    tags={"tasks", "read"},
+    annotations={"readOnlyHint": True},
+)
 async def list_tasks(
-    plan_id: str,
-    select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
+    plan_id: Annotated[str, "The ID of the plan to list tasks for (from list_my_plans or list_group_plans)."],
+    select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
 ) -> list[PlannerTask] | None:
-    """List all tasks in a Planner plan.
-
-    Args:
-        plan_id: The ID of the plan to list tasks for (from list_my_plans or list_group_plans).
-        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,dueDateTime,assignments". Pass "*all" for all fields.
-
-    Returns:
-        A list of PlannerTask objects in the plan, or None if the plan has no tasks.
-    """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -134,30 +127,20 @@ async def list_tasks(
     return tasks or None
 
 
-@tasks_router.tool(name="create_task")
+@tasks_router.tool(
+    name="create_task",
+    description="Create a new task in a Planner plan.",
+    tags={"tasks", "write"},
+)
 async def create_task(
-    plan_id: str,
-    bucket_id: str,
-    title: str,
-    start_date_time: str | None = None,
-    due_date_time: str | None = None,
-    percent_complete: Annotated[int, Field(ge=0, le=100)] | None = None,
-    assign_user_ids: list[str] | None = None,
+    plan_id: Annotated[str, "The ID of the plan to create the task in."],
+    bucket_id: Annotated[str, "The ID of the bucket to place the task in (from list_buckets)."],
+    title: Annotated[str, "The title of the task."],
+    start_date_time: Annotated[str | None, "ISO 8601 start date (e.g. '2026-05-01T00:00:00'). Must not be after due_date_time."] = None,
+    due_date_time: Annotated[str | None, "ISO 8601 due date (e.g. '2026-05-31T00:00:00')."] = None,
+    percent_complete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
+    assign_user_ids: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
 ) -> PlannerTask | None:
-    """Create a new task in a Planner plan.
-
-    Args:
-        plan_id: The ID of the plan to create the task in.
-        bucket_id: The ID of the bucket to place the task in (from list_buckets).
-        title: The title of the task.
-        start_date_time: Optional ISO 8601 start date (e.g. "2026-05-01T00:00:00"). Must not be after due_date_time.
-        due_date_time: Optional ISO 8601 due date (e.g. "2026-05-31T00:00:00").
-        percent_complete: Optional completion percentage (0–100).
-        assign_user_ids: Optional list of user object IDs to assign to the task.
-
-    Returns:
-        The created PlannerTask object.
-    """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -210,16 +193,15 @@ async def create_task(
 
 # readOnlyHint=True: this tool reads task details without any side effects.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
-@tasks_router.tool(name="get_task_details", annotations={"readOnlyHint": True})
-async def get_task_details(task_id: str) -> PlannerTaskDetails | None:
-    """Get the full details for a Planner task: description, checklist items, and external references.
-
-    Args:
-        task_id: The ID of the task to retrieve details for (from list_my_tasks or list_tasks).
-
-    Returns:
-        A PlannerTaskDetails object with description, checklist, and references.
-    """
+@tasks_router.tool(
+    name="get_task_details",
+    description="Get the full details for a Planner task: description, checklist items, and external references.",
+    tags={"tasks", "read"},
+    annotations={"readOnlyHint": True},
+)
+async def get_task_details(
+    task_id: Annotated[str, "The ID of the task to retrieve details for (from list_my_tasks or list_tasks)."],
+) -> PlannerTaskDetails | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -235,34 +217,23 @@ async def get_task_details(task_id: str) -> PlannerTaskDetails | None:
     return result if result else None
 
 
-@tasks_router.tool(name="update_task")
+@tasks_router.tool(
+    name="update_task",
+    description="Update a Planner task's basic fields. All fields are optional — only provided fields are changed.",
+    tags={"tasks", "write"},
+    annotations={"idempotentHint": True},
+)
 async def update_task(
-    task_id: str,
-    etag: str,
-    title: str | None = None,
-    percent_complete: Annotated[int, Field(ge=0, le=100)] | None = None,
-    due_date_time: str | None = None,
-    bucket_id: str | None = None,
-    assignee_priority: str | None = None,
-    assign_user_ids: list[str] | None = None,
-    unassign_user_ids: list[str] | None = None,
+    task_id: Annotated[str, "The ID of the task to update (from list_my_tasks or list_tasks)."],
+    etag: Annotated[str, "The current @odata.etag of the task. Retries once automatically if stale (412/409)."],
+    title: Annotated[str | None, "New title for the task."] = None,
+    percent_complete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
+    due_date_time: Annotated[str | None, "ISO 8601 due date string (e.g. '2026-05-31T00:00:00')."] = None,
+    bucket_id: Annotated[str | None, "ID of the bucket to move the task to."] = None,
+    assignee_priority: Annotated[str | None, "Order hint string for sorting within the assignee's task list."] = None,
+    assign_user_ids: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
+    unassign_user_ids: Annotated[list[str] | None, "List of user object IDs to remove from the task."] = None,
 ) -> PlannerTask | None:
-    """Update a Planner task's basic fields. All fields are optional — only provided fields are changed.
-
-    Args:
-        task_id: The ID of the task to update (from list_my_tasks or list_tasks).
-        etag: The current @odata.etag of the task. Retries once automatically if stale (412/409).
-        title: New title for the task.
-        percent_complete: Completion percentage from 0 to 100.
-        due_date_time: ISO 8601 due date string (e.g. "2026-05-31T00:00:00").
-        bucket_id: ID of the bucket to move the task to.
-        assignee_priority: Order hint string for sorting within the assignee's task list.
-        assign_user_ids: List of user object IDs to assign to the task.
-        unassign_user_ids: List of user object IDs to remove from the task.
-
-    Returns:
-        The updated PlannerTask object.
-    """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -289,28 +260,19 @@ async def update_task(
         return await svc.patch_task(task_id, body, etag)
 
 
-@tasks_router.tool(name="update_task_details")
+@tasks_router.tool(
+    name="update_task_details",
+    description="Update the details of a Planner task: description, checklist items, and external references.",
+    tags={"tasks", "write"},
+    annotations={"idempotentHint": True},
+)
 async def update_task_details(
-    task_id: str,
-    etag: str,
-    description: str | None = None,
-    checklist_items: dict | None = None,
-    references: dict | None = None,
+    task_id: Annotated[str, "The ID of the task to update."],
+    etag: Annotated[str, "The current @odata.etag of the task details resource (from get_task_details). Retries once automatically if stale (412/409)."],
+    description: Annotated[str | None, "New plain-text description for the task."] = None,
+    checklist_items: Annotated[dict | None, "Dict keyed by checklist item GUID. Pass null for a key to delete that item."] = None,
+    references: Annotated[dict | None, "Dict keyed by URL-encoded reference URL (periods to %2E, colons to %3A). Pass null for a key to delete that reference."] = None,
 ) -> PlannerTaskDetails | None:
-    """Update the details of a Planner task: description, checklist items, and external references.
-
-    Args:
-        task_id: The ID of the task to update.
-        etag: The current @odata.etag of the task details resource (from get_task_details). Retries once automatically if stale (412/409).
-        description: New plain-text description for the task.
-        checklist_items: Dict keyed by checklist item GUID. Pass null for a key to delete that item.
-            Example: { "<guid>": { "@odata.type": "microsoft.graph.plannerChecklistItem", "title": "...", "isChecked": false } }
-        references: Dict keyed by URL-encoded reference URL (periods → %2E, colons → %3A). Pass null for a key to delete that reference.
-            Example: { "https%3A//example%2Ecom": { "@odata.type": "microsoft.graph.plannerExternalReference", "alias": "...", "previewPriority": " !", "type": "Other" } }
-
-    Returns:
-        The updated PlannerTaskDetails object.
-    """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -335,14 +297,16 @@ async def update_task_details(
             raise
 
 
-@tasks_router.tool(name="delete_task")
-async def delete_task(task_id: str, etag: str) -> None:
-    """Delete a Planner task.
-
-    Args:
-        task_id: The ID of the task to delete.
-        etag: The current @odata.etag of the task. Retries once automatically if stale (412/409).
-    """
+@tasks_router.tool(
+    name="delete_task",
+    description="Delete a Planner task.",
+    tags={"tasks", "write"},
+    annotations={"destructiveHint": True},
+)
+async def delete_task(
+    task_id: Annotated[str, "The ID of the task to delete."],
+    etag: Annotated[str, "The current @odata.etag of the task. Retries once automatically if stale (412/409)."],
+) -> None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Annotated
+
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
@@ -18,22 +20,15 @@ plans_router = FastMCP("plans")
 # readOnlyHint=True signals to the MCP client that this tool never mutates
 # state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
-@plans_router.tool(name="list_my_plans", annotations={"readOnlyHint": True})
+@plans_router.tool(
+    name="list_my_plans",
+    description="List Planner plans directly associated with the authenticated user.",
+    tags={"plans", "read"},
+    annotations={"readOnlyHint": True},
+)
 async def list_my_plans(
-    select: str | None = "id,title,owner,createdBy,createdDateTime",
+    select: Annotated[str | None, "Comma-separated list of PlannerPlan fields to include. Pass '*all' for all fields."] = "id,title,owner,createdBy,createdDateTime",
 ) -> list[PlannerPlan] | None:
-    """List Planner plans directly associated with the authenticated user.
-
-    Note: this endpoint only returns plans the user personally owns or has a direct
-    relationship with. Group-owned plans (the common case) do not appear here —
-    use list_group_plans with a group_id from list_my_groups instead.
-
-    Args:
-        select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,createdBy,createdDateTime". Pass "*all" for all fields.
-
-    Returns:
-        A list of PlannerPlan objects, or None if the user has no directly-owned plans.
-    """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -74,20 +69,16 @@ async def list_my_plans(
     return all_plans or None
 
 
-@plans_router.tool(name="list_group_plans", annotations={"readOnlyHint": True})
+@plans_router.tool(
+    name="list_group_plans",
+    description="List all Planner plans belonging to a Microsoft 365 group.",
+    tags={"plans", "read"},
+    annotations={"readOnlyHint": True},
+)
 async def list_group_plans(
-    group_id: str,
-    select: str | None = "id,title,owner,createdBy,createdDateTime"
-    ) -> list[PlannerPlan] | None:
-    """List all Planner plans belonging to a Microsoft 365 group.
-
-    Args:
-        group_id: The object ID of the group (from list_my_groups).
-        select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,createdBy,createdDateTime". Pass "*all" for all fields.
-
-    Returns:
-        A list of PlannerPlan objects belonging to the group, or None if the group has no plans.
-    """
+    group_id: Annotated[str, "The object ID of the group (from list_my_groups)."],
+    select: Annotated[str | None, "Comma-separated list of PlannerPlan fields to include. Pass '*all' for all fields."] = "id,title,owner,createdBy,createdDateTime",
+) -> list[PlannerPlan] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -141,17 +132,15 @@ async def list_group_plans(
     return plans or None
 
 
-@plans_router.tool(name="create_plan")
-async def create_plan(group_id: str, title: str) -> PlannerPlan | None:
-    """Create a new Planner plan for a Microsoft 365 group.
-
-    Args:
-        group_id: The object ID of the M365 group that will own the plan (from list_my_groups).
-        title: The display title for the new plan.
-
-    Returns:
-        The created PlannerPlan object.
-    """
+@plans_router.tool(
+    name="create_plan",
+    description="Create a new Planner plan for a Microsoft 365 group.",
+    tags={"plans", "write"},
+)
+async def create_plan(
+    group_id: Annotated[str, "The object ID of the M365 group that will own the plan (from list_my_groups)."],
+    title: Annotated[str, "The display title for the new plan."],
+) -> PlannerPlan | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -180,14 +169,16 @@ async def create_plan(group_id: str, title: str) -> PlannerPlan | None:
             raise ValueError(f"Cannot create plan ({code}): {msg}") from exc
 
 
-@plans_router.tool(name="delete_plan")
-async def delete_plan(plan_id: str, etag: str) -> None:
-    """Delete a Planner plan.
-
-    Args:
-        plan_id: The ID of the plan to delete (from list_my_plans or list_group_plans).
-        etag: The current @odata.etag of the plan. Retries once automatically if stale (412/409).
-    """
+@plans_router.tool(
+    name="delete_plan",
+    description="Delete a Planner plan.",
+    tags={"plans", "write"},
+    annotations={"destructiveHint": True},
+)
+async def delete_plan(
+    plan_id: Annotated[str, "The ID of the plan to delete (from list_my_plans or list_group_plans)."],
+    etag: Annotated[str, "The current @odata.etag of the plan. Retries once automatically if stale (412/409)."],
+) -> None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")

@@ -14,13 +14,13 @@ me_router = FastMCP("me")
 # state, so the client (e.g. Claude, MCP Inspector) can skip confirmation
 # prompts. Without it, clients treat the tool as potentially destructive.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
-@me_router.tool(name="get_me", annotations={"readOnlyHint": True})
+@me_router.tool(
+    name="get_me",
+    description="Return the authenticated user's profile from Microsoft Graph.",
+    tags={"users", "read"},
+    annotations={"readOnlyHint": True},
+)
 async def get_me() -> User | None:
-    """Return the authenticated user's profile from Microsoft Graph.
-
-    Returns:
-        The authenticated user's identity as a User object.
-    """
     # get_access_token() returns the FastMCP session token injected by
     # AzureProvider after the OAuth flow completes. It is None when the request
     # arrives without a valid session (e.g. a bare HTTP call without the
