@@ -4,6 +4,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
+from kiota_abstractions.headers_collection import HeadersCollection
 from msgraph.generated.users.item.transitive_member_of.graph_group.graph_group_request_builder import GraphGroupRequestBuilder
 
 from ..deps import get_optional_context
@@ -39,6 +40,8 @@ async def list_my_groups(
     if ctx is not None:
         await ctx.debug("Fetching Microsoft 365 group memberships for the authenticated user")
 
+    if select is not None and not select.strip():
+        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
     # "*all" is a sentinel that bypasses $select entirely so Graph returns
     # every field. Passing select=None to the SDK achieves this — the SDK
     # omits the $select query parameter from the request URL.
@@ -68,9 +71,19 @@ async def list_my_groups(
         # response includes roles, admin units, and other non-group objects that
         # cannot be passed to list_group_plans or create_plan.
         # Docs: https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof
+        #
+        # ConsistencyLevel: eventual is REQUIRED for transitiveMemberOf when
+        # using any query parameters ($select, $filter, $orderby) or OData cast.
+        # Without it, Graph silently returns only id + @odata.type for each
+        # group, discarding all other fields (displayName, mail, etc.) because
+        # the eventual-consistency index is not consulted.
+        # Docs: https://learn.microsoft.com/en-us/graph/aad-advanced-queries
+        headers = HeadersCollection()
+        headers.add("ConsistencyLevel", "eventual")
         groups = await GroupService(graph_client, serialize=True).paginate(
             graph_client.me.transitive_member_of.graph_group,
             RequestConfiguration(
+                headers=headers,
                 query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
                     select=select_fields,
                     filter=filter,

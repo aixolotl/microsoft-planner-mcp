@@ -151,7 +151,7 @@ async def test_list_my_tasks_forwards_obo_token(token_capturing_ctx):
 
 @pytest.mark.parametrize("select_arg,expected", [
     ({"select": "id,title,planId"}, ["id", "title", "planId"]),
-    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),
+    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "startDateTime", "dueDateTime", "assignments"]),
     ({"select": "*all"}, None),
     ({"select": None}, None),
 ], ids=["custom-csv", "default", "star-all", "explicit-none"])
@@ -363,7 +363,7 @@ async def test_list_tasks_returns_none_when_empty(get_return, graph_ctx):
 
 @pytest.mark.parametrize("select_arg,expected", [
     ({"select": "id,title"}, ["id", "title"]),
-    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),
+    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "startDateTime", "dueDateTime", "assignments"]),
     ({"select": "*all"}, None),
     ({"select": None}, None),
 ], ids=["custom-csv", "default", "star-all", "explicit-none"])

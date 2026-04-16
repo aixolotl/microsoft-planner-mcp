@@ -42,7 +42,15 @@ async def list_buckets(plan_id: str) -> list[dict] | None:
         # drops everything past the first page. paginate() follows all pages
         # via PageIterator and returns a flat list.
         # Docs: https://learn.microsoft.com/en-us/graph/paging
-        buckets = await BucketService(graph_client, serialize=True).paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
+        try:
+            buckets = await BucketService(graph_client, serialize=True).paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
+        except ODataError as exc:
+            # 404 means the plan_id does not exist. Convert to a clear
+            # ValueError so the LLM receives a readable message rather than a
+            # raw ODataError stack trace.
+            if exc.response_status_code != 404:
+                raise
+            raise ValueError(f"Plan '{plan_id}' not found.") from exc
 
     if ctx is not None:
         await ctx.info(f"Found {len(buckets)} bucket(s) in plan {plan_id}")

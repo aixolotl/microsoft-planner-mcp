@@ -35,12 +35,12 @@ tasks_router = FastMCP("tasks")
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="list_my_tasks", annotations={"readOnlyHint": True})
 async def list_my_tasks(
-    select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
+    select: str | None = "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments",
 ) -> list[dict] | None:
     """List all Planner tasks assigned to the authenticated user across all plans.
 
     Args:
-        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,dueDateTime,assignments". Pass "*all" for all fields.
+        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments". Pass "*all" for all fields.
 
     Returns:
         A list of PlannerTask objects assigned to the user, or None if there are no tasks.
@@ -54,6 +54,12 @@ async def list_my_tasks(
     if ctx is not None:
         await ctx.info("Fetching tasks assigned to the authenticated user")
 
+    # An empty string for select is ambiguous — it could mean "no fields" or
+    # "use the default", but the SDK treats it as omitting $select entirely,
+    # returning ALL fields. Reject it explicitly so callers get a clear error
+    # rather than silently receiving more data than expected.
+    if select is not None and not select.strip():
+        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
     # "*all" is a sentinel that tells the tool to omit $select entirely so
     # Graph returns every task field. Without the sentinel, callers would have
     # to set select=None explicitly, which is less ergonomic for LLM agents.
@@ -89,13 +95,13 @@ async def list_my_tasks(
 @tasks_router.tool(name="list_tasks", annotations={"readOnlyHint": True})
 async def list_tasks(
     plan_id: str,
-    select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
+    select: str | None = "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments",
 ) -> list[dict] | None:
     """List all tasks in a Planner plan.
 
     Args:
         plan_id: The ID of the plan to list tasks for (from list_my_plans or list_group_plans).
-        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,dueDateTime,assignments". Pass "*all" for all fields.
+        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments". Pass "*all" for all fields.
 
     Returns:
         A list of PlannerTask objects in the plan, or None if the plan has no tasks.
@@ -109,6 +115,8 @@ async def list_tasks(
     if ctx is not None:
         await ctx.info(f"Fetching tasks for plan {plan_id}")
 
+    if select is not None and not select.strip():
+        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
     if select == "*all":
         select = None
 
@@ -198,10 +206,12 @@ async def create_task(
             task = await graph_client.planner.tasks.post(body)
         except ODataError as exc:
             # 403 from task creation usually means the user has hit the plan
-            # task limit or lacks write permission. Convert to ValueError with a
-            # readable message so the LLM gets a clear explanation. All other
-            # status codes are re-raised so genuine failures surface normally.
-            if exc.response_status_code != 403:
+            # task limit or lacks write permission. 404 means one of the IDs
+            # (plan_id, bucket_id, or an assignee in assign_user_ids) was not
+            # found. Both are converted to ValueError so the LLM receives a
+            # clear explanation. All other status codes are re-raised so genuine
+            # failures surface normally.
+            if exc.response_status_code not in (403, 404):
                 raise
             code = exc.error.code if exc.error else None
             msg = exc.error.message if exc.error else exc.primary_message

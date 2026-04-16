@@ -173,17 +173,28 @@ async def test_list_group_plans_403_raises_value_error(code, msg, match, graph_c
             await list_group_plans("group-1")
 
 
-async def test_list_group_plans_non_403_odata_error_reraises(graph_ctx, make_odata_error):
+async def test_list_group_plans_non_403_non_404_odata_error_reraises(graph_ctx, make_odata_error):
     graph_client = MagicMock()
     graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
-        side_effect=make_odata_error(404, "ResourceNotFound")
+        side_effect=make_odata_error(500, "ServiceError")
     )
 
     with graph_ctx(MODULE, graph_client):
         with pytest.raises(ODataError) as exc_info:
             await list_group_plans("group-1")
 
-    assert exc_info.value.response_status_code == 404
+    assert exc_info.value.response_status_code == 500
+
+
+async def test_list_group_plans_404_raises_value_error(graph_ctx, make_odata_error):
+    graph_client = MagicMock()
+    graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
+        side_effect=make_odata_error(404, "ResourceNotFound")
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match="not found"):
+            await list_group_plans("group-1")
 
 
 async def test_list_group_plans_forwards_obo_token(token_capturing_ctx):

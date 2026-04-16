@@ -43,6 +43,8 @@ async def list_my_plans(
     if ctx is not None:
         await ctx.info("Fetching Planner plans for the authenticated user")
 
+    if select is not None and not select.strip():
+        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
     # "*all" is a sentinel that bypasses $select entirely so Graph returns
     # every field. Passing select=None to the SDK achieves this — the SDK
     # omits the $select query parameter from the request URL.
@@ -97,6 +99,8 @@ async def list_group_plans(
     if ctx is not None:
         await ctx.info(f"Fetching Planner plans for group {group_id}")
 
+    if select is not None and not select.strip():
+        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
     # "*all" is a sentinel that bypasses $select entirely so Graph returns
     # every field. Passing select=None to the SDK achieves this — the SDK
     # omits the $select query parameter from the request URL.
@@ -123,17 +127,21 @@ async def list_group_plans(
                 ),
             )
         except ODataError as exc:
-            # 403 from the groups endpoint means the user is not a member of
-            # that group (or doesn't have permission to read its plans). We
-            # convert this to a ValueError with a human-readable message so
-            # the LLM receives a clear explanation rather than a raw ODataError
-            # stack trace. All other status codes (e.g. 404, 500) are re-raised
-            # as-is so genuine failures are not silently swallowed.
+            # 404 means the group_id does not exist at all.
+            # 403 means the user is not a member of the group or lacks
+            # permission to read its plans — but Graph sometimes also returns
+            # 403 for non-existent groups, so the message hints at both.
+            # All other status codes are re-raised so genuine failures surface.
+            if exc.response_status_code == 404:
+                raise ValueError(f"Group '{group_id}' not found.") from exc
             if exc.response_status_code != 403:
                 raise
             code = exc.error.code if exc.error else None
             msg = exc.error.message if exc.error else exc.primary_message
-            raise ValueError(f"Access denied for group {group_id!r} ({code}): {msg}") from exc
+            raise ValueError(
+                f"Access denied for group '{group_id}' ({code}): {msg}. "
+                "Verify the group ID is correct and the user is a member."
+            ) from exc
 
     if ctx is not None:
         await ctx.info(f"Found {len(plans)} plan(s) in group {group_id}")
