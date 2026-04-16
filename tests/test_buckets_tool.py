@@ -180,6 +180,14 @@ async def test_delete_bucket_calls_service(graph_ctx):
     # here isolates the tool from service internals so retry logic changes
     # do not break this test.
     graph_client = MagicMock()
+    # Pre-flight task check must return an empty collection so the tool
+    # proceeds to deletion. Return a result with value=[] to simulate an
+    # empty bucket.
+    empty_tasks = MagicMock()
+    empty_tasks.value = []
+    graph_client.planner.buckets.by_planner_bucket_id.return_value.tasks.get = AsyncMock(
+        return_value=empty_tasks
+    )
 
     with graph_ctx(MODULE, graph_client), \
          patch(f"{MODULE}.BucketService") as mock_svc_cls:
@@ -192,8 +200,37 @@ async def test_delete_bucket_calls_service(graph_ctx):
     mock_svc.delete_bucket.assert_awaited_once_with("bucket-1", '"etag-v1"')
 
 
+async def test_delete_bucket_rejects_non_empty_bucket(graph_ctx):
+    # If the bucket still has tasks, the tool must raise ValueError before
+    # calling BucketService.delete_bucket so no orphaned tasks are created.
+    graph_client = MagicMock()
+    task_mock = MagicMock()
+    task_mock.id = "task-1"
+    non_empty_tasks = MagicMock()
+    non_empty_tasks.value = [task_mock]
+    graph_client.planner.buckets.by_planner_bucket_id.return_value.tasks.get = AsyncMock(
+        return_value=non_empty_tasks
+    )
+
+    with graph_ctx(MODULE, graph_client), \
+         patch(f"{MODULE}.BucketService") as mock_svc_cls:
+        mock_svc = MagicMock()
+        mock_svc.delete_bucket = AsyncMock()
+        mock_svc_cls.return_value = mock_svc
+
+        with pytest.raises(ValueError, match="still contains tasks"):
+            await delete_bucket("bucket-1", '"etag-v1"')
+
+    mock_svc.delete_bucket.assert_not_awaited()
+
+
 async def test_delete_bucket_forwards_obo_token(token_capturing_ctx):
     graph_client = MagicMock()
+    empty_tasks = MagicMock()
+    empty_tasks.value = []
+    graph_client.planner.buckets.by_planner_bucket_id.return_value.tasks.get = AsyncMock(
+        return_value=empty_tasks
+    )
 
     with token_capturing_ctx(MODULE, graph_client, "my-obo") as received, \
          patch(f"{MODULE}.BucketService") as mock_svc_cls:

@@ -3,8 +3,10 @@ from __future__ import annotations
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
+from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_bucket import PlannerBucket
+from msgraph.generated.planner.buckets.item.tasks.tasks_request_builder import TasksRequestBuilder as BucketTasksRequestBuilder
 
 from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
@@ -45,9 +47,9 @@ async def list_buckets(plan_id: str) -> list[dict] | None:
         try:
             buckets = await BucketService(graph_client, serialize=True).paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
         except ODataError as exc:
-            # 404 means the plan_id does not exist. Convert to a clear
-            # ValueError so the LLM receives a readable message rather than a
-            # raw ODataError stack trace.
+            # 404 means plan_id does not exist. Convert to a clear ValueError
+            # rather than surfacing a raw ODataError stack trace to the LLM.
+            # Docs: https://learn.microsoft.com/en-us/graph/api/plannerplan-list-buckets
             if exc.response_status_code != 404:
                 raise
             raise ValueError(f"Plan '{plan_id}' not found.") from exc
@@ -124,6 +126,28 @@ async def delete_bucket(bucket_id: str, etag: str) -> dict:
         raise AuthorizationError("No access token available")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        # Pre-flight: check whether the bucket still contains tasks before
+        # attempting deletion. The Graph API DELETE /planner/buckets/{id} docs
+        # list 409 as a possible response, and live testing shows it can also
+        # silently succeed on non-empty buckets, leaving tasks orphaned with a
+        # dangling bucketId. Either outcome is harmful, so we fail-fast here.
+        # We request only `id` with $top=1 — one field, one item is the cheapest
+        # possible check to detect non-empty state without fetching all tasks.
+        # Docs: https://learn.microsoft.com/en-us/graph/api/plannerbucket-list-tasks
+        # Docs: https://learn.microsoft.com/en-us/graph/api/plannerbucket-delete
+        task_check = await graph_client.planner.buckets.by_planner_bucket_id(bucket_id).tasks.get(
+            request_configuration=RequestConfiguration(
+                query_parameters=BucketTasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
+                    select=["id"],
+                    top=1,
+                )
+            )
+        )
+        if task_check and task_check.value:
+            raise ValueError(
+                f"Bucket '{bucket_id}' still contains tasks. "
+                "Delete all tasks in the bucket using delete_task first, then retry."
+            )
         svc = BucketService(graph_client)
         await svc.delete_bucket(bucket_id, etag)
     return {"deleted": True, "id": bucket_id}

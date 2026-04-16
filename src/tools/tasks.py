@@ -57,7 +57,10 @@ async def list_my_tasks(
     # An empty string for select is ambiguous — it could mean "no fields" or
     # "use the default", but the SDK treats it as omitting $select entirely,
     # returning ALL fields. Reject it explicitly so callers get a clear error
-    # rather than silently receiving more data than expected.
+    # rather than silently receiving more data than expected. Without this
+    # guard, split(",") on "" yields [""] which after the strip/filter produces
+    # [], and the SDK omits $select just as if select=None were passed.
+    # Docs: https://learn.microsoft.com/en-us/graph/query-parameters#select-parameter
     if select is not None and not select.strip():
         raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
     # "*all" is a sentinel that tells the tool to omit $select entirely so
@@ -67,7 +70,11 @@ async def list_my_tasks(
         select = None
 
     # The Graph SDK's $select parameter is a list[str], not a comma-separated
-    # string. We split here so callers can use the natural "id,title" syntax.
+    # string. Kiota codegen emits QueryParameters dataclasses that accept
+    # list[str] for multi-value OData params. Without the split, passing
+    # "id,title" as a single string would send ?$select=id%2Ctitle (one field
+    # named "id,title") instead of ?$select=id,title (two fields).
+    # Docs: https://github.com/microsoft/kiota-abstractions-python
     select_fields = (
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
@@ -75,14 +82,25 @@ async def list_my_tasks(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        tasks = await TaskService(graph_client, serialize=True).paginate(
-            graph_client.me.planner.tasks,
-            RequestConfiguration(
-                query_parameters=TasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
-                    select=select_fields
-                )
-            ),
-        )
+        try:
+            tasks = await TaskService(graph_client, serialize=True).paginate(
+                graph_client.me.planner.tasks,
+                RequestConfiguration(
+                    query_parameters=TasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
+                        select=select_fields
+                    )
+                ),
+            )
+        except ODataError as exc:
+            # 400 from this endpoint means $select contained an unrecognised
+            # field name. Graph returns a descriptive OData error message; we
+            # surface it as ValueError so the LLM receives readable text.
+            # Without this catch, callers see a raw APIError stack trace.
+            # Docs: https://learn.microsoft.com/en-us/graph/errors
+            if exc.response_status_code != 400:
+                raise
+            msg = exc.error.message if exc.error else exc.primary_message
+            raise ValueError(f"Invalid select: {msg}") from exc
 
     if ctx is not None:
         await ctx.info(f"Found {len(tasks)} task(s) assigned to you")
@@ -117,9 +135,12 @@ async def list_tasks(
 
     if select is not None and not select.strip():
         raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
+    # "*all" sentinel — see list_my_tasks for rationale.
     if select == "*all":
         select = None
 
+    # Kiota QueryParameters dataclasses take list[str] for $select, not CSV.
+    # Docs: https://github.com/microsoft/kiota-abstractions-python
     select_fields = (
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
@@ -127,14 +148,23 @@ async def list_tasks(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        tasks = await TaskService(graph_client, serialize=True).paginate(
-            graph_client.planner.plans.by_planner_plan_id(plan_id).tasks,
-            RequestConfiguration(
-                query_parameters=PlanTasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
-                    select=select_fields
-                )
-            ),
-        )
+        try:
+            tasks = await TaskService(graph_client, serialize=True).paginate(
+                graph_client.planner.plans.by_planner_plan_id(plan_id).tasks,
+                RequestConfiguration(
+                    query_parameters=PlanTasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
+                        select=select_fields
+                    )
+                ),
+            )
+        except ODataError as exc:
+            # 400 from $select with an unrecognised field name; surface as
+            # ValueError. Without this, callers see a raw APIError stack trace.
+            # Docs: https://learn.microsoft.com/en-us/graph/errors
+            if exc.response_status_code != 400:
+                raise
+            msg = exc.error.message if exc.error else exc.primary_message
+            raise ValueError(f"Invalid select: {msg}") from exc
 
     if ctx is not None:
         await ctx.info(f"Found {len(tasks)} task(s) in plan {plan_id}")

@@ -5,6 +5,7 @@ from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from kiota_abstractions.headers_collection import HeadersCollection
+from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.users.item.transitive_member_of.graph_group.graph_group_request_builder import GraphGroupRequestBuilder
 
 from ..deps import get_optional_context
@@ -45,19 +46,21 @@ async def list_my_groups(
     # "*all" is a sentinel that bypasses $select entirely so Graph returns
     # every field. Passing select=None to the SDK achieves this — the SDK
     # omits the $select query parameter from the request URL.
+    # Docs: https://learn.microsoft.com/en-us/graph/query-parameters#select-parameter
     if select == "*all":
         select = None
 
-    # The Graph SDK's $select parameter requires a list of field names, not a
-    # comma-separated string. We split here so callers can use the natural
-    # "id,displayName,mail" syntax without needing to know the SDK's internal shape.
+    # Kiota QueryParameters dataclasses require list[str] for $select, not a
+    # comma-separated string. Without the split, "id,displayName" would be sent
+    # as a single field name rather than two separate ones.
+    # Docs: https://github.com/microsoft/kiota-abstractions-python
     select_fields = (
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
         else None
     )
     # $expand also requires a list[str]. Split the caller-supplied CSV the same
-    # way as $select so callers don't need to know the SDK's internal shape.
+    # way as $select so callers don’t need to know the SDK’s internal shape.
     expand_fields = (
         [field.strip() for field in expand.split(",") if field.strip()]
         if expand is not None
@@ -80,17 +83,31 @@ async def list_my_groups(
         # Docs: https://learn.microsoft.com/en-us/graph/aad-advanced-queries
         headers = HeadersCollection()
         headers.add("ConsistencyLevel", "eventual")
-        groups = await GroupService(graph_client, serialize=True).paginate(
-            graph_client.me.transitive_member_of.graph_group,
-            RequestConfiguration(
-                headers=headers,
-                query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
-                    select=select_fields,
-                    filter=filter,
-                    expand=expand_fields,
-                )
-            ),
-        )
+        try:
+            groups = await GroupService(graph_client, serialize=True).paginate(
+                graph_client.me.transitive_member_of.graph_group,
+                RequestConfiguration(
+                    headers=headers,
+                    query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
+                        select=select_fields,
+                        filter=filter,
+                        expand=expand_fields,
+                    )
+                ),
+            )
+        except ODataError as exc:
+            # 400 from this endpoint has two common causes:
+            #   (a) $select or $expand used an unrecognised field/navigation property.
+            #   (b) $filter was supplied without the required ConsistencyLevel header
+            #       (transitiveMemberOf does not support $filter at all).
+            # Either way, surface the Graph error message as a ValueError so the
+            # LLM gets readable text rather than a raw APIError stack trace.
+            # Without this catch, a bad $expand such as "plans" returns a raw 400.
+            # Docs: https://learn.microsoft.com/en-us/graph/errors
+            if exc.response_status_code != 400:
+                raise
+            msg = exc.error.message if exc.error else exc.primary_message
+            raise ValueError(f"Invalid query parameter: {msg}") from exc
 
     if ctx is not None:
         await ctx.debug(f"Found {len(groups)} group(s)")

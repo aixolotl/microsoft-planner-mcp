@@ -48,12 +48,14 @@ async def list_my_plans(
     # "*all" is a sentinel that bypasses $select entirely so Graph returns
     # every field. Passing select=None to the SDK achieves this — the SDK
     # omits the $select query parameter from the request URL.
+    # Docs: https://learn.microsoft.com/en-us/graph/query-parameters#select-parameter
     if select == "*all":
         select = None
 
-    # The Graph SDK's $select parameter requires a list of field names, not a
-    # comma-separated string. We split here so callers can use the natural
-    # "id,title,owner" syntax without needing to know the SDK's internal shape.
+    # Kiota QueryParameters dataclasses require list[str] for $select, not a
+    # comma-separated string. Without the split, "id,title" would be sent as a
+    # single field name "id,title" rather than two separate fields.
+    # Docs: https://github.com/microsoft/kiota-abstractions-python
     select_fields = (
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
@@ -61,14 +63,24 @@ async def list_my_plans(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        all_plans = await PlanService(graph_client, serialize=True).paginate(
-            graph_client.me.planner.plans,
-            RequestConfiguration(
-                query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
-                    select=select_fields
-                )
-            ),
-        )
+        try:
+            all_plans = await PlanService(graph_client, serialize=True).paginate(
+                graph_client.me.planner.plans,
+                RequestConfiguration(
+                    query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
+                        select=select_fields
+                    )
+                ),
+            )
+        except ODataError as exc:
+            # 400 from $select with an unrecognised field name; re-raise as
+            # ValueError so the LLM receives the Graph error message directly.
+            # Without this, callers see a raw APIError stack trace.
+            # Docs: https://learn.microsoft.com/en-us/graph/errors
+            if exc.response_status_code != 400:
+                raise
+            msg = exc.error.message if exc.error else exc.primary_message
+            raise ValueError(f"Invalid select: {msg}") from exc
 
     if ctx is not None:
         await ctx.info(f"Found {len(all_plans)} plan(s)")
@@ -101,15 +113,13 @@ async def list_group_plans(
 
     if select is not None and not select.strip():
         raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
-    # "*all" is a sentinel that bypasses $select entirely so Graph returns
-    # every field. Passing select=None to the SDK achieves this — the SDK
-    # omits the $select query parameter from the request URL.
+    # "*all" sentinel — see list_my_plans for rationale.
+    # Docs: https://learn.microsoft.com/en-us/graph/query-parameters#select-parameter
     if select == "*all":
         select = None
 
-    # The Graph SDK's $select parameter requires a list of field names, not a
-    # comma-separated string. We split here so callers can use the natural
-    # "id,title,owner" syntax without needing to know the SDK's internal shape.
+    # Kiota QueryParameters dataclasses require list[str] for $select.
+    # Docs: https://github.com/microsoft/kiota-abstractions-python
     select_fields = (
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
@@ -127,11 +137,15 @@ async def list_group_plans(
                 ),
             )
         except ODataError as exc:
-            # 404 means the group_id does not exist at all.
-            # 403 means the user is not a member of the group or lacks
-            # permission to read its plans — but Graph sometimes also returns
-            # 403 for non-existent groups, so the message hints at both.
-            # All other status codes are re-raised so genuine failures surface.
+            # 400: $select contained an unrecognised field name.
+            # 404: group_id does not exist.
+            # 403: user is not a member or lacks permission; Graph also returns
+            #   403 for some non-existent group IDs, so the message hints at both.
+            # All other codes are re-raised so genuine failures surface.
+            # Docs: https://learn.microsoft.com/en-us/graph/api/resources/planner-overview#common-planner-error-conditions
+            if exc.response_status_code == 400:
+                msg = exc.error.message if exc.error else exc.primary_message
+                raise ValueError(f"Invalid select: {msg}") from exc
             if exc.response_status_code == 404:
                 raise ValueError(f"Group '{group_id}' not found.") from exc
             if exc.response_status_code != 403:
