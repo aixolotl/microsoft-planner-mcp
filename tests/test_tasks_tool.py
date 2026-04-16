@@ -8,7 +8,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastmcp.exceptions import AuthorizationError
-from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
 
@@ -415,21 +414,16 @@ async def test_update_task_details_invalid_preview_type_raises(graph_ctx):
             await update_task_details("task-1", '"etag-v1"', preview_type="invalid")
 
 
-@pytest.mark.parametrize("status,code,exc_type", [
-    (403, "MaximumChecklistItemsOnTask", ValueError),
-    (400, "BadRequest", ODataError),
-], ids=["403-value-error", "400-reraises"])
-async def test_update_task_details_odata_error(status, code, exc_type, graph_ctx, make_odata_error):
+@pytest.mark.parametrize("status,code", [
+    (403, "MaximumChecklistItemsOnTask"),
+    (400, "BadRequest"),
+], ids=["403-forbidden", "400-bad-request"])
+async def test_update_task_details_odata_error(status, code, graph_ctx, make_odata_error):
     graph_client = make_patching_graph_client(side_effect=make_odata_error(status, code))
 
     with graph_ctx(MODULE, graph_client):
-        with pytest.raises(exc_type) as exc_info:
+        with pytest.raises(RuntimeError, match="Graph API error"):
             await update_task_details("task-1", '"etag-v1"', description="x")
-
-    if exc_type is ValueError:
-        assert code in str(exc_info.value)
-    else:
-        assert exc_info.value.response_status_code == status
 
 
 # ---------------------------------------------------------------------------
@@ -448,7 +442,7 @@ async def test_delete_task_delegates_to_sdk(graph_ctx):
     # Verify the ETag reaches the If-Match header on the request configuration.
     config = delete_mock.call_args.kwargs["request_configuration"]
     assert config.headers.get("if-match") == {'"etag-v1"'}
-    assert result is None
+    assert result == "Deleted task 'task-1'."
 
 
 # ---------------------------------------------------------------------------
@@ -574,7 +568,7 @@ async def test_create_task_sets_optional_fields(graph_ctx):
 
 @pytest.mark.parametrize("status,code,exc_type", [
     (403, "MaximumTasksInProject", ValueError),
-    (400, "BadRequest", ODataError),
+    (400, "BadRequest", RuntimeError),
 ], ids=["403-value-error", "400-reraises"])
 async def test_create_task_odata_error(status, code, exc_type, graph_ctx, make_odata_error):
     graph_client = MagicMock()
@@ -587,4 +581,4 @@ async def test_create_task_odata_error(status, code, exc_type, graph_ctx, make_o
     if exc_type is ValueError:
         assert code in str(exc_info.value)
     else:
-        assert exc_info.value.response_status_code == status
+        assert "Graph API error" in str(exc_info.value)

@@ -169,5 +169,22 @@ class PlannerService:
             # conflict is indistinguishable from a persistent server error.
             # Docs: https://learn.microsoft.com/en-us/graph/api/plannertask-update#request-headers
             if exc.response_status_code not in (409, 412):
-                raise
-            return await operation(await refresh())
+                raise RuntimeError(self.clean_graph_error(exc)) from None
+            try:
+                return await operation(await refresh())
+            except ODataError as retry_exc:
+                raise RuntimeError(self.clean_graph_error(retry_exc)) from None
+
+    @staticmethod
+    def clean_graph_error(exc: ODataError) -> str:
+        """Format a Graph API error as a user-safe string without internal IDs.
+
+        ODataError.__str__() includes client_request_id, datetime, and InnerError
+        objects that leak server internals. This helper extracts only the HTTP
+        status and user-facing message so callers can re-raise a clean exception.
+        Without this, mask_error_details=True on FastMCP still exposes the raw
+        repr because it masks tracebacks, not exception messages.
+        """
+        status = exc.response_status_code or "unknown"
+        msg = (exc.error.message if exc.error else None) or "Unknown error"
+        return f"Graph API error ({status}): {msg}"

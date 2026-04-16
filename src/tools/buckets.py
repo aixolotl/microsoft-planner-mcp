@@ -44,7 +44,10 @@ async def list_buckets(
         # drops everything past the first page. paginate() follows all pages
         # via PageIterator and returns a flat list.
         # Docs: https://learn.microsoft.com/en-us/graph/paging
-        buckets = await PlannerService.paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
+        try:
+            buckets = await PlannerService.paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
+        except ODataError as exc:
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
     if ctx is not None:
         await ctx.info(f"Found {len(buckets)} bucket(s) in plan {plan_id}")
@@ -86,11 +89,11 @@ async def create_bucket(
         except ODataError as exc:
             # 403 means the user lacks write access to the plan. Convert to a
             # clear ValueError so the LLM receives a readable explanation.
-            if exc.response_status_code != 403:
-                raise
-            code = exc.error.code if exc.error else None
-            msg = exc.error.message if exc.error else exc.primary_message
-            raise ValueError(f"Cannot create bucket ({code}): {msg}") from exc
+            if exc.response_status_code == 403:
+                code = exc.error.code if exc.error else None
+                msg = exc.error.message if exc.error else exc.primary_message
+                raise ValueError(f"Cannot create bucket ({code}): {msg}") from exc
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
 
 @buckets_router.tool(
@@ -102,7 +105,7 @@ async def create_bucket(
 async def delete_bucket(
     bucket_id: Annotated[str, "The ID of the bucket to delete (from list_buckets)."],
     etag: Annotated[str, "The current @odata.etag of the bucket. Retries once automatically if stale (412/409)."],
-) -> None:
+) -> str:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -115,3 +118,4 @@ async def delete_bucket(
             lambda e: item.delete(request_configuration=svc.make_config(e)),
             lambda: svc.refresh_etag(item.get, f"bucket {bucket_id!r}"),
         )
+    return f"Deleted bucket {bucket_id!r}."
