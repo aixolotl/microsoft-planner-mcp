@@ -105,9 +105,9 @@ async def test_returns_none_when_no_plans(get_return, graph_ctx):
 
 
 @pytest.mark.parametrize("select_arg,expected", [
-    ({"select": "id,title,owner,details"}, ["id", "title", "owner", "details"]),
+    ({"select": "id,title,owner,createdBy,createdDateTime"}, ["id", "title", "owner", "createdBy", "createdDateTime"]),
     ({"select": "id,title"}, ["id", "title"]),
-    ({}, ["id", "title", "owner", "details"]),
+    ({}, ["id", "title", "owner", "createdBy", "createdDateTime"]),  # default value
     ({"select": "*all"}, None),
     ({"select": None}, None),
 ], ids=["explicit-csv", "custom-csv", "default", "star-all", "explicit-none"])
