@@ -51,7 +51,7 @@ async def list_my_groups(
         expand: Comma-separated list of related entities to expand. Use OData expand syntax, e.g. "members($select=id,displayName)".
 
     Returns:
-        A list of Group objects, or None if the user belongs to no groups.
+        A list of serialized group dicts, or None if the user belongs to no groups.
         Each group's id field can be used as the group_id for list_group_plans
         and create_plan.
     """
@@ -95,7 +95,13 @@ async def list_my_groups(
         if expand is not None
         else None
     )
-    
+    # Guard: same comma-only / whitespace-only check as select_fields above.
+    if expand_fields is not None and not expand_fields:
+        raise ValueError(
+            f"expand resolved to no fields after parsing (input: {expand!r}). "
+            "Pass None to omit $expand."
+        )
+
     async with graph_client_manager.for_user(token.token) as graph_client:
         # /me/memberOf returns all directory objects the user belongs to, not
         # just groups. We use /me/transitiveMemberOf/microsoft.graph.group to

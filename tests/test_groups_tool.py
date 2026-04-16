@@ -194,3 +194,11 @@ async def test_comma_only_select_raises_value_error(bad_select, graph_ctx):
     with graph_ctx(MODULE, graph_client):
         with pytest.raises(ValueError, match="resolved to no fields"):
             await list_my_groups(select=bad_select)
+
+
+@pytest.mark.parametrize("bad_expand", [", ,", ",", " , "], ids=["comma-space", "bare-comma", "space-comma-space"])
+async def test_comma_only_expand_raises_value_error(bad_expand, graph_ctx):
+    graph_client = MagicMock()
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match="resolved to no fields"):
+            await list_my_groups(expand=bad_expand)

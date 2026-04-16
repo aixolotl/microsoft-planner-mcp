@@ -103,7 +103,7 @@ class BasePlannerService:
         # RequestConfiguration's default `headers` field is a class-level
         # mutable default shared across all instances; re-using it causes
         # If-Match values from one call to bleed into the next. This is covered
-        # by test_configs_do_not_share_headers in test_task_service.py.
+        # by test_configs_do_not_share_headers in test_planner_service.py.
         headers = HeadersCollection()
         headers.add("If-Match", etag)
         if prefer_representation:

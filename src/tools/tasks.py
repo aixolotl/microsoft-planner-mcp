@@ -56,7 +56,7 @@ async def list_my_tasks(
         select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments". Pass "*all" for all fields.
 
     Returns:
-        A list of PlannerTask objects assigned to the user, or None if there are no tasks.
+        A list of serialized task dicts assigned to the user, or None if there are no tasks.
     """
     token = get_access_token()
     if token is None:
@@ -145,7 +145,7 @@ async def list_tasks(
         select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments". Pass "*all" for all fields.
 
     Returns:
-        A list of PlannerTask objects in the plan, or None if the plan has no tasks.
+        A list of serialized task dicts in the plan, or None if the plan has no tasks.
     """
     token = get_access_token()
     if token is None:

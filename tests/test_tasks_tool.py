@@ -197,13 +197,13 @@ async def test_get_task_details_returns_none_when_not_found(graph_ctx):
 
 
 async def test_update_task_returns_updated_task(graph_ctx):
-    updated = make_task(title="Updated")
+    updated = BasePlannerService.serialize_graph_object(make_task(title="Updated"))
     svc = make_patch_svc(return_value=updated)
 
     with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         result = await update_task("task-1", '"etag-v1"', title="Updated")
 
-    assert result is updated
+    assert result == updated
     svc.patch_task.assert_awaited_once()
     _, call_body, call_etag = svc.patch_task.call_args.args
     assert call_body.title == "Updated"
@@ -273,13 +273,13 @@ async def test_update_task_no_fields_sends_empty_body(graph_ctx):
 
 
 async def test_update_task_details_returns_updated_details(graph_ctx):
-    updated = make_details("new desc")
+    updated = BasePlannerService.serialize_graph_object(make_details("new desc"))
     svc = make_patch_svc(return_value=updated)
 
     with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         result = await update_task_details("task-1", '"etag-v1"', description="new desc")
 
-    assert result is updated
+    assert result == updated
     svc.patch_task_details.assert_awaited_once()
     _, body, etag = svc.patch_task_details.call_args.args
     assert body.description == "new desc"
