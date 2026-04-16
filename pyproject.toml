@@ -14,11 +14,28 @@ dependencies = [
 dev = [
     "pytest>=9.0.3",
     "pytest-asyncio>=1.3.0",
+    "pytest-cov>=7.1.0",
+]
+# Optional OTEL SDK packages. Install when OTEL_EXPORTER_OTLP_ENDPOINT is
+# set in the environment and you want traces exported to an OTLP backend
+# (Jaeger, Datadog, Grafana Tempo, etc.). Without these, src/telemetry.py
+# configure() silently skips setup and FastMCP runs with no-op OTEL.
+# Install: uv sync --group otel
+# Docs: https://gofastmcp.com/servers/telemetry
+otel = [
+    "opentelemetry-sdk>=1.35,<2.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.35,<2.0",
 ]
 
 [tool.pytest]
 minversion = "9.0"
 testpaths = ["tests"]
-asyncio_mode = "strict"
+asyncio_mode = "auto"
 addopts = ["--import-mode=importlib"]
 pythonpath = ["."]
+filterwarnings = [
+    # kiota-abstractions fires warn() in the GetQueryParameters class body (SDK bug)
+    "ignore::DeprecationWarning:kiota_abstractions",
+    # msgraph-sdk generated request-configuration subclasses fire warn() in class bodies (SDK bug)
+    "ignore::DeprecationWarning:msgraph",
+]

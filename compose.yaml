@@ -1,8 +1,13 @@
 # compose.yaml sourced from https://github.com/astral-sh/uv-docker-example/blob/main/compose.yml
 services:
   mcp:
-    # Build the image from the Dockerfile in the current directory
-    build: .
+    # Build the image from the Dockerfile in the current directory.
+    # INSTALL_OTEL=1 triggers `uv sync --group otel` inside the image so the
+    # OpenTelemetry SDK is available and traces are exported to Jaeger below.
+    build:
+      context: .
+      args:
+        INSTALL_OTEL: "1"
 
     # Load environment variables from .env file
     env_file:
@@ -15,6 +20,29 @@ services:
     environment:
       # Include development dependencies when working locally
       - UV_NO_DEV=0
+      # --- OpenTelemetry ---
+      # Tell src/telemetry.py to activate SDK export. The endpoint points at
+      # the jaeger service below (gRPC OTLP on port 4317). Without this env
+      # var configure() is a silent no-op and no traces are exported.
+      # Docs: https://gofastmcp.com/servers/telemetry
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=microsoft-planner-mcp
+      # uvicorn --reload for hot-reloading local code changes via the volume
+      # mount in develop.watch below. Remove in a production image.
+      - UVICORN_RELOAD=true
+
+    # Override the Dockerfile CMD to add --reload. The Dockerfile CMD is kept
+    # production-safe (no --reload) so this only applies in local compose.
+    command: >
+      uv run uvicorn src.server:app
+        --host 0.0.0.0
+        --port 8000
+        --reload
+
+    # mcp must start after Jaeger is accepting connections
+    depends_on:
+      jaeger:
+        condition: service_healthy
 
     # Run as root during development so the environment is mutable
     # Alternatively, you could set `UV_PROJECT_ENVIRONMENT` to a path owned by the non-root user
@@ -24,7 +52,9 @@ services:
       # Create a `watch` configuration to update the app
       # https://docs.docker.com/compose/file-watch/#compose-watch-versus-bind-mounts
       watch:
-        # Sync the working directory with the `/app` directory in the container
+        # Sync the working directory with the `/app` directory in the container.
+        # Combined with --reload above this gives instant hot-reload without
+        # rebuilding the image on every Python file change.
         - action: sync
           path: .
           target: /app
@@ -36,3 +66,47 @@ services:
         # Rebuild the image if dependencies change by checking uv.lock
         - action: rebuild
           path: ./uv.lock
+
+  # ---------------------------------------------------------------------------
+  # Jaeger v2 — all-in-one trace backend
+  # UI:        http://localhost:16686   (search by service "microsoft-planner-mcp")
+  # OTLP gRPC: localhost:4317           (used by the mcp service above)
+  #
+  # WHY: FastMCP emits OTEL spans for every tool call, resource read, and
+  # prompt render (see src/telemetry.py). Jaeger collects and visualises those
+  # spans so you can see tool latency, error rates, and the full OBO → Graph
+  # request chain. Without this service, OTEL_EXPORTER_OTLP_ENDPOINT has
+  # nowhere to send traces and the SDK will log connection errors.
+  #
+  # NOTE: jaegertracing/all-in-one (v1) reached end-of-life on 2025-12-31.
+  # Use jaegertracing/jaeger (v2) which is built on the OTel Collector
+  # framework and is configured via jaeger.yaml (mounted below) instead of
+  # environment variables.
+  #
+  # Docs (FastMCP telemetry):   https://gofastmcp.com/servers/telemetry
+  # Docs (Jaeger v2 migration): https://www.jaegertracing.io/docs/latest/migration/
+  # Docs (Jaeger v2 config):    https://www.jaegertracing.io/docs/latest/configuration/
+  # ---------------------------------------------------------------------------
+  jaeger:
+    # v2 all-in-one image. For production use separate jaeger-collector +
+    # jaeger-query deployments with persistent storage.
+    # Docs: https://www.jaegertracing.io/docs/latest/getting-started/
+    image: jaegertracing/jaeger:latest
+    ports:
+      - "16686:16686"   # Jaeger UI
+      - "4317:4317"     # OTLP gRPC receiver
+    volumes:
+      # v2 uses a YAML config file instead of environment variables.
+      # jaeger.yaml defines the OTLP receiver, memory storage, and query UI.
+      # Docs: https://www.jaegertracing.io/docs/latest/configuration/
+      - ./jaeger.yaml:/etc/jaeger/config.yaml:ro
+    command: ["--config", "/etc/jaeger/config.yaml"]
+    healthcheck:
+      # healthcheckv2 extension in jaeger.yaml exposes GET http://localhost:13133/
+      # The mcp service waits for this before starting so no spans are dropped
+      # during the Jaeger startup window.
+      # Docs: https://www.jaegertracing.io/docs/latest/deployment/#health-check
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:13133/status"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
