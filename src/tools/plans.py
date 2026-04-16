@@ -20,12 +20,12 @@ plans_router = FastMCP("plans")
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @plans_router.tool(name="list_my_plans", annotations={"readOnlyHint": True})
 async def list_my_plans(
-    select: str | None = "id,title,owner,details",
+    select: str | None = "id,title,owner,createdBy,createdDateTime",
 ) -> list[PlannerPlan] | None:
     """List all Planner plans accessible to the authenticated user.
 
     Args:
-        select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,details". Pass "*all" for all fields.
+        select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,createdBy,createdDateTime". Pass "*all" for all fields.
 
     Returns:
         A list of PlannerPlan objects, or None if the user has no plans.
@@ -71,11 +71,15 @@ async def list_my_plans(
 
 
 @plans_router.tool(name="list_group_plans", annotations={"readOnlyHint": True})
-async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
+async def list_group_plans(
+    group_id: str,
+    select: str | None = "id,title,owner,createdBy,createdDateTime"
+    ) -> list[PlannerPlan] | None:
     """List all Planner plans belonging to a Microsoft 365 group.
 
     Args:
         group_id: The object ID of the group (available as plan.owner from list_my_plans).
+        select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,createdBy,createdDateTime". Pass "*all" for all fields.
 
     Returns:
         A list of PlannerPlan objects belonging to the group, or None if the group has no plans.
@@ -89,9 +93,31 @@ async def list_group_plans(group_id: str) -> list[PlannerPlan] | None:
     if ctx is not None:
         await ctx.info(f"Fetching Planner plans for group {group_id}")
 
+    # "*all" is a sentinel that bypasses $select entirely so Graph returns
+    # every field. Passing select=None to the SDK achieves this — the SDK
+    # omits the $select query parameter from the request URL.
+    if select == "*all":
+        select = None
+
+    # The Graph SDK's $select parameter requires a list of field names, not a
+    # comma-separated string. We split here so callers can use the natural
+    # "id,title,owner" syntax without needing to know the SDK's internal shape.
+    select_fields = (
+        [field.strip() for field in select.split(",") if field.strip()]
+        if select is not None
+        else None
+    )
+
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
-            plans = await PlannerService.paginate(graph_client.groups.by_group_id(group_id).planner.plans)
+            plans = await PlannerService.paginate(
+                graph_client.groups.by_group_id(group_id).planner.plans,
+                RequestConfiguration(
+                    query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
+                        select=select_fields
+                    )
+                ),
+            )
         except ODataError as exc:
             # 403 from the groups endpoint means the user is not a member of
             # that group (or doesn't have permission to read its plans). We
