@@ -182,12 +182,15 @@ async def create_plan(group_id: str, title: str) -> dict | None:
 
 
 @plans_router.tool(name="delete_plan")
-async def delete_plan(plan_id: str, etag: str) -> None:
+async def delete_plan(plan_id: str, etag: str) -> dict:
     """Delete a Planner plan.
 
     Args:
         plan_id: The ID of the plan to delete (from list_my_plans or list_group_plans).
         etag: The current @odata.etag of the plan. Retries once automatically if stale (412/409).
+
+    Returns:
+        A dict confirming deletion: {"deleted": true, "id": "<plan_id>"}.
     """
     token = get_access_token()
     if token is None:
@@ -196,3 +199,4 @@ async def delete_plan(plan_id: str, etag: str) -> None:
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlanService(graph_client)
         await svc.delete_plan(plan_id, etag)
+    return {"deleted": True, "id": plan_id}

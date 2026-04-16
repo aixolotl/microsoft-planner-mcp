@@ -54,4 +54,4 @@ class TaskService(BasePlannerService):
             lambda e: item.patch(body, request_configuration=self._make_config(e, prefer_representation=True)),
             lambda: self._refresh_details_etag(task_id),
         )
-        return serialize_graph_object(result) if self._serialize else result
+        return self.serialize_graph_object(result) if self._serialize else result

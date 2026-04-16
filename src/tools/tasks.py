@@ -89,13 +89,13 @@ async def list_my_tasks(
 @tasks_router.tool(name="list_tasks", annotations={"readOnlyHint": True})
 async def list_tasks(
     plan_id: str,
-    select: str | None = "id,title,bucketId,percentComplete,dueDateTime,assignments",
+    select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
 ) -> list[dict] | None:
     """List all tasks in a Planner plan.
 
     Args:
         plan_id: The ID of the plan to list tasks for (from list_my_plans or list_group_plans).
-        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,bucketId,percentComplete,dueDateTime,assignments". Pass "*all" for all fields.
+        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,dueDateTime,assignments". Pass "*all" for all fields.
 
     Returns:
         A list of PlannerTask objects in the plan, or None if the plan has no tasks.
@@ -242,6 +242,7 @@ async def update_task(
     etag: str,
     title: str | None = None,
     percent_complete: Annotated[int, Field(ge=0, le=100)] | None = None,
+    start_date_time: str | None = None,
     due_date_time: str | None = None,
     bucket_id: str | None = None,
     assignee_priority: str | None = None,
@@ -255,6 +256,7 @@ async def update_task(
         etag: The current @odata.etag of the task. Retries once automatically if stale (412/409).
         title: New title for the task.
         percent_complete: Completion percentage from 0 to 100.
+        start_date_time: ISO 8601 start date string (e.g. "2026-05-01T00:00:00"). Must not be after due_date_time.
         due_date_time: ISO 8601 due date string (e.g. "2026-05-31T00:00:00").
         bucket_id: ID of the bucket to move the task to.
         assignee_priority: Order hint string for sorting within the assignee's task list.
@@ -268,13 +270,30 @@ async def update_task(
     if token is None:
         raise AuthorizationError("No access token available")
 
+    # Detect conflicting user lists before touching the Graph API so the caller
+    # gets a clear error rather than a silent no-op where the unassign wins.
+    # Docs: https://learn.microsoft.com/en-us/graph/api/plannertask-update
+    if assign_user_ids and unassign_user_ids:
+        conflict = set(assign_user_ids) & set(unassign_user_ids)
+        if conflict:
+            raise ValueError(f"User IDs present in both assign_user_ids and unassign_user_ids: {sorted(conflict)}")
+
+    start_dt = TaskService.to_utc(start_date_time) if start_date_time else None
+    due_dt = TaskService.to_utc(due_date_time) if due_date_time else None
+    # Validate ordering only when both are being set in this call; if only one
+    # is provided the existing stored value is unchanged and we cannot check here.
+    # Docs: https://learn.microsoft.com/en-us/graph/api/resources/plannertask
+    if start_dt and due_dt and start_dt > due_dt:
+        raise ValueError(f"start_date_time ({start_date_time}) must not be after due_date_time ({due_date_time})")
+
     body = PlannerTask()
     for attr, value in [
         ("title", title),
         ("percent_complete", percent_complete),
         ("bucket_id", bucket_id),
         ("assignee_priority", assignee_priority),
-        ("due_date_time", TaskService.to_utc(due_date_time) if due_date_time is not None else None),
+        ("start_date_time", start_dt),
+        ("due_date_time", due_dt),
     ]:
         if value is not None:
             setattr(body, attr, value)
@@ -339,12 +358,15 @@ async def update_task_details(
 
 
 @tasks_router.tool(name="delete_task")
-async def delete_task(task_id: str, etag: str) -> None:
+async def delete_task(task_id: str, etag: str) -> dict:
     """Delete a Planner task.
 
     Args:
         task_id: The ID of the task to delete.
         etag: The current @odata.etag of the task. Retries once automatically if stale (412/409).
+
+    Returns:
+        A dict confirming deletion: {"deleted": true, "id": "<task_id>"}.
     """
     token = get_access_token()
     if token is None:
@@ -353,3 +375,4 @@ async def delete_task(task_id: str, etag: str) -> None:
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = TaskService(graph_client)
         await svc.delete_task(task_id, etag)
+    return {"deleted": True, "id": task_id}

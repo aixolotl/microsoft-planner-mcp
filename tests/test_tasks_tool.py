@@ -328,7 +328,7 @@ async def test_delete_task_delegates_to_service(graph_ctx):
         result = await delete_task("task-1", '"etag-v1"')
 
     svc.delete_task.assert_awaited_once_with("task-1", '"etag-v1"')
-    assert result is None
+    assert result == {"deleted": True, "id": "task-1"}
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@ async def test_list_tasks_returns_none_when_empty(get_return, graph_ctx):
 
 @pytest.mark.parametrize("select_arg,expected", [
     ({"select": "id,title"}, ["id", "title"]),
-    ({}, ["id", "title", "bucketId", "percentComplete", "dueDateTime", "assignments"]),
+    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),
     ({"select": "*all"}, None),
     ({"select": None}, None),
 ], ids=["custom-csv", "default", "star-all", "explicit-none"])

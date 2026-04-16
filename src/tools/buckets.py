@@ -93,12 +93,23 @@ async def create_bucket(plan_id: str, name: str) -> dict | None:
 
 
 @buckets_router.tool(name="delete_bucket")
-async def delete_bucket(bucket_id: str, etag: str) -> None:
+async def delete_bucket(bucket_id: str, etag: str) -> dict:
     """Delete a Planner bucket.
+
+    Note: the bucket must be empty (contain no tasks) before it can be deleted.
+    Delete all tasks in the bucket first using delete_task, then call this tool.
+    Attempting to delete a non-empty bucket returns a 409 Conflict from Graph;
+    this is a permanent error — retrying will not help.
+    Docs: https://learn.microsoft.com/en-us/graph/api/plannerbucket-delete
 
     Args:
         bucket_id: The ID of the bucket to delete (from list_buckets).
-        etag: The current @odata.etag of the bucket. Retries once automatically if stale (412/409).
+        etag: The current @odata.etag of the bucket. Retries once automatically if
+            the etag is stale (412 Precondition Failed). A 409 caused by a non-empty
+            bucket is NOT retried — empty the bucket first.
+
+    Returns:
+        A dict confirming deletion: {"deleted": true, "id": "<bucket_id>"}.
     """
     token = get_access_token()
     if token is None:
@@ -107,3 +118,4 @@ async def delete_bucket(bucket_id: str, etag: str) -> None:
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = BucketService(graph_client)
         await svc.delete_bucket(bucket_id, etag)
+    return {"deleted": True, "id": bucket_id}
