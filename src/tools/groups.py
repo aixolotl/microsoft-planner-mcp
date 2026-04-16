@@ -6,6 +6,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
+from kiota_abstractions.headers_collection import HeadersCollection
 from msgraph.generated.models.group import Group
 from msgraph.generated.users.item.transitive_member_of.graph_group.graph_group_request_builder import GraphGroupRequestBuilder
 
@@ -63,14 +64,24 @@ async def list_my_groups(
         # response includes roles, admin units, and other non-group objects that
         # cannot be passed to list_group_plans or create_plan.
         # Docs: https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof
+        config = RequestConfiguration(
+            query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
+                select=select_fields,
+                filter=filter,
+                count=True if filter else None,
+            ),
+        )
+        # $filter on /me/transitiveMemberOf/microsoft.graph.group is an
+        # advanced query — Graph requires ConsistencyLevel: eventual and
+        # $count=true or it returns 400 Request_UnsupportedQuery. Without
+        # these headers, every filter value is rejected.
+        # Docs: https://learn.microsoft.com/en-us/graph/aad-advanced-queries
+        if filter:
+            config.headers = HeadersCollection()
+            config.headers.try_add("ConsistencyLevel", "eventual")
         groups = await PlannerService.paginate(
             graph_client.me.transitive_member_of.graph_group,
-            RequestConfiguration(
-                query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
-                    select=select_fields,
-                    filter=filter,
-                )
-            ),
+            config,
         )
 
     if ctx is not None:
