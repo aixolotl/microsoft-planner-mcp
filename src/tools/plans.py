@@ -98,7 +98,7 @@ async def list_my_plans(
             # 400 from $select with an unrecognised field name; re-raise as
             # ValueError so the LLM receives the Graph error message directly.
             # Without this, callers see a raw APIError stack trace.
-            # Docs: https://learn.microsoft.com/en-us/graph/errors
+            # Docs: https://learn.microsoft.com/en-us/graph/errors#http-status-codes
             if exc.response_status_code != 400:
                 raise
             msg = exc.error.message if exc.error else exc.primary_message
@@ -181,10 +181,10 @@ async def list_group_plans(
         except ODataError as exc:
             # 400: $select contained an unrecognised field name.
             # 404: group_id does not exist.
-            # 403: user is not a member or lacks permission; Graph also returns
-            #   403 for some non-existent group IDs, so the message hints at both.
+            # 403: user is not a member or lacks permission.
             # All other codes are re-raised so genuine failures surface.
             # Docs: https://learn.microsoft.com/en-us/graph/api/resources/planner-overview#common-planner-error-conditions
+            # Docs: https://learn.microsoft.com/en-us/graph/errors#http-status-codes
             if exc.response_status_code == 400:
                 msg = exc.error.message if exc.error else exc.primary_message
                 raise ValueError(f"Invalid select: {msg}") from exc
@@ -196,7 +196,7 @@ async def list_group_plans(
             msg = exc.error.message if exc.error else exc.primary_message
             raise ValueError(
                 f"Access denied for group '{group_id}' ({code}): {msg}. "
-                "Verify the group ID is correct and the user is a member."
+                "Verify the user is a member of the group."
             ) from exc
 
     if ctx is not None:
@@ -251,7 +251,7 @@ async def delete_plan(plan_id: str, etag: str) -> dict:
 
     Args:
         plan_id: The ID of the plan to delete (from list_my_plans or list_group_plans).
-        etag: The current @odata.etag of the plan. Retries once automatically if stale (412/409).
+        etag: The current @odata.etag of the plan. PlanService retries once with a refreshed ETag on 412/409.
 
     Returns:
         A dict confirming deletion: {"deleted": true, "id": "<plan_id>"}.

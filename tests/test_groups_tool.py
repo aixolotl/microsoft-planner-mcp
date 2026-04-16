@@ -154,7 +154,7 @@ async def test_all_sentinel_omits_select(graph_ctx):
 
 @pytest.mark.parametrize("status,match", [
     (403, "Insufficient privileges"),
-    (404, "Navigation property not found"),
+    (404, "Resource not found"),
 ], ids=["expand-403", "expand-404"])
 async def test_expand_odata_error_raises_value_error(status, match, graph_ctx, make_odata_error):
     # Bug 014: 403/404 from $expand were surfacing as raw 'Internal error'.

@@ -86,7 +86,8 @@ class BasePlannerService:
     def to_utc(s: str) -> datetime:
         """Parse an ISO 8601 datetime string and return it normalised to UTC.
 
-        Naive datetimes (no timezone) are assumed to be UTC.
+        Naive datetimes (no timezone) are assumed to be UTC because Microsoft
+        Graph always returns datetime values in UTC.
         """
         dt = datetime.fromisoformat(s)
         return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
@@ -122,10 +123,12 @@ class BasePlannerService:
             # Graph Planner requires an If-Match header containing the current
             # ETag of the resource. If another client has modified the resource
             # since the caller last read it, Graph returns 412 (Precondition
-            # Failed) or 409 (Conflict). Rather than surfacing this as an error,
-            # we re-fetch the current ETag and retry once. A single retry is
-            # sufficient because concurrent modifications are rare and a second
-            # conflict is indistinguishable from a persistent server error.
+            # Failed). Graph may also return 409 (Conflict) for concurrent
+            # modifications — distinct from the non-empty bucket 409, which is
+            # caught by the pre-flight check in delete_bucket before this method
+            # is ever called. A single retry is sufficient because concurrent
+            # modifications are rare and a second conflict is indistinguishable
+            # from a persistent server error.
             # Docs: https://learn.microsoft.com/en-us/graph/api/plannertask-update#request-headers
             if exc.response_status_code not in (409, 412):
                 raise

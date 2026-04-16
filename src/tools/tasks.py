@@ -30,8 +30,8 @@ from ..services.task_service import TaskService
 tasks_router = FastMCP("tasks")
 
 
-# readOnlyHint=True signals to MCP clients that this tool never mutates state,
-# allowing them to skip user confirmation prompts for read operations.
+# readOnlyHint=True signals to the MCP client that this tool never mutates
+# state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="list_my_tasks", annotations={"readOnlyHint": True})
 async def list_my_tasks(
@@ -105,7 +105,7 @@ async def list_my_tasks(
             # field name. Graph returns a descriptive OData error message; we
             # surface it as ValueError so the LLM receives readable text.
             # Without this catch, callers see a raw APIError stack trace.
-            # Docs: https://learn.microsoft.com/en-us/graph/errors
+            # Docs: https://learn.microsoft.com/en-us/graph/errors#http-status-codes
             if exc.response_status_code != 400:
                 raise
             msg = exc.error.message if exc.error else exc.primary_message
@@ -117,7 +117,8 @@ async def list_my_tasks(
     return tasks or None
 
 
-# readOnlyHint=True: this tool only reads from Graph, never writes.
+# readOnlyHint=True signals to the MCP client that this tool never mutates
+# state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="list_tasks", annotations={"readOnlyHint": True})
 async def list_tasks(
@@ -190,7 +191,7 @@ async def list_tasks(
             # 400: $select contained an unrecognised field name.
             # 404: plan_id does not exist.
             # Docs: https://learn.microsoft.com/en-us/graph/api/plannerplan-list-tasks
-            # Docs: https://learn.microsoft.com/en-us/graph/errors
+            # Docs: https://learn.microsoft.com/en-us/graph/errors#http-status-codes
             if exc.response_status_code == 400:
                 msg = exc.error.message if exc.error else exc.primary_message
                 raise ValueError(f"Invalid select: {msg}") from exc
@@ -281,7 +282,8 @@ async def create_task(
     return TaskService.serialize_graph_object(task)
 
 
-# readOnlyHint=True: this tool reads task details without any side effects.
+# readOnlyHint=True signals to the MCP client that this tool never mutates
+# state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="get_task_details", annotations={"readOnlyHint": True})
 async def get_task_details(task_id: str) -> dict | None:
@@ -334,7 +336,7 @@ async def update_task(
 
     Args:
         task_id: The ID of the task to update (from list_my_tasks or list_tasks).
-        etag: The current @odata.etag of the task. Retries once automatically if stale (412/409).
+        etag: The current @odata.etag of the task. TaskService retries once with a refreshed ETag on 412/409.
         title: New title for the task.
         percent_complete: Completion percentage from 0 to 100.
         start_date_time: ISO 8601 start date string (e.g. "2026-05-01T00:00:00"). Must not be after due_date_time.
@@ -412,7 +414,7 @@ async def update_task_details(
 
     Args:
         task_id: The ID of the task to update.
-        etag: The current @odata.etag of the task details resource (from get_task_details). Retries once automatically if stale (412/409).
+        etag: The current @odata.etag of the task details resource (from get_task_details). TaskService retries once with a refreshed ETag on 412/409.
         description: New plain-text description for the task.
         checklist_items: Dict keyed by checklist item GUID. Pass null for a key to delete that item.
             Example: { "<guid>": { "@odata.type": "microsoft.graph.plannerChecklistItem", "title": "...", "isChecked": false } }
@@ -455,7 +457,7 @@ async def delete_task(task_id: str, etag: str) -> dict:
 
     Args:
         task_id: The ID of the task to delete.
-        etag: The current @odata.etag of the task. Retries once automatically if stale (412/409).
+        etag: The current @odata.etag of the task. TaskService retries once with a refreshed ETag on 412/409.
 
     Returns:
         A dict confirming deletion: {"deleted": true, "id": "<task_id>"}.

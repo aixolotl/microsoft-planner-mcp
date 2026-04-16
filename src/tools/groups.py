@@ -52,7 +52,8 @@ async def list_my_groups(
 
     Returns:
         A list of Group objects, or None if the user belongs to no groups.
-        Each group's id field can be used as the group_id for list_group_plans and create_plan.
+        Each group's id field can be used as the group_id for list_group_plans
+        and create_plan.
     """
     token = get_access_token()
     if token is None:
@@ -106,6 +107,7 @@ async def list_my_groups(
         # Without it, Graph silently returns only id + @odata.type for each
         # group, discarding all other fields (displayName, mail, etc.) because
         # the eventual-consistency index is not consulted.
+        # Docs: https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof#optional-query-parameters
         # Docs: https://learn.microsoft.com/en-us/graph/aad-advanced-queries
         headers = HeadersCollection()
         headers.add("ConsistencyLevel", "eventual")
@@ -124,12 +126,12 @@ async def list_my_groups(
             # Convert all ODataErrors to ValueError so the LLM receives readable
             # text rather than a raw APIError stack trace.
             # Docs: https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof#optional-query-parameters
-            # Docs: https://learn.microsoft.com/en-us/graph/errors
+            # Docs: https://learn.microsoft.com/en-us/graph/errors#http-status-codes
             code = exc.response_status_code
             msg = exc.error.message if exc.error else exc.primary_message
             if code == 400:
-                # (a) $select/$expand referenced an unknown field/navigation property.
-                # (b) $filter used — transitiveMemberOf does not support $filter.
+                # $select or $expand referenced an unknown field or navigation
+                # property — Graph returns 400 with a descriptive error message.
                 raise ValueError(f"Invalid query parameter: {msg}") from exc
             if code == 403:
                 # User lacks permission to expand (e.g. GroupMember.Read.All
@@ -140,10 +142,11 @@ async def list_my_groups(
                     "GroupMember.Read.All or Member.Read.Hidden.All."
                 ) from exc
             if code == 404:
-                # $expand referenced a navigation property not available on
-                # the Group resource at the transitiveMemberOf endpoint.
+                # The resource was not found — the endpoint may not be available
+                # for this user, or a navigation property in $expand does not
+                # exist on the Group at the transitiveMemberOf endpoint.
                 raise ValueError(
-                    f"Navigation property not found (expand='{expand}'): {msg}."
+                    f"Resource not found: {msg}."
                 ) from exc
             raise
 

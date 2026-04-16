@@ -102,7 +102,8 @@ async def create_bucket(
     body.plan_id = plan_id
     body.name = name
     # orderHint " !" is the Graph API sentinel meaning "place first in order".
-    # Without an orderHint, Graph rejects the POST with 400 Bad Request.
+    # The field is documented as optional, but in practice omitting it causes
+    # Graph to return 400 Bad Request, so we always supply the sentinel value.
     # Docs: https://learn.microsoft.com/en-us/graph/api/resources/planner-order-hint-format
     body.order_hint = " !"
 
@@ -120,6 +121,9 @@ async def create_bucket(
     return BucketService.serialize_graph_object(bucket)
 
 
+# destructiveHint=True signals to the MCP client that this tool irreversibly
+# deletes a resource, allowing it to request user confirmation before executing.
+# Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @buckets_router.tool(name="delete_bucket", annotations={"destructiveHint": True})
 async def delete_bucket(
     bucket_id: Annotated[
@@ -130,26 +134,29 @@ async def delete_bucket(
         str,
         Field(
             description=(
-                "The current @odata.etag of the bucket. Retries once automatically if "
-                "the etag is stale (412 Precondition Failed). A 409 caused by a non-empty "
-                "bucket is NOT retried — empty the bucket first."
+                "The current @odata.etag of the bucket. BucketService retries once with "
+                "a refreshed ETag on 412 Precondition Failed or 409 Conflict. "
+                "A 409 triggered by a non-empty bucket is intercepted by the pre-flight "
+                "check before the service is called — empty the bucket first."
             )
         ),
     ],
 ) -> dict:
     """Delete a Planner bucket.
 
-    Note: the bucket must be empty (contain no tasks) before it can be deleted.
-    Delete all tasks in the bucket first using delete_task, then call this tool.
-    Attempting to delete a non-empty bucket returns a 409 Conflict from Graph;
-    this is a permanent error — retrying will not help.
+    Note: Graph does not reliably enforce the empty-bucket invariant — it may
+    return 409 Conflict or silently succeed while leaving tasks orphaned with a
+    dangling bucketId. This tool performs a client-side pre-flight check and
+    raises ValueError if the bucket still contains tasks, so callers must delete
+    all tasks using delete_task before calling this tool.
     Docs: https://learn.microsoft.com/en-us/graph/api/plannerbucket-delete
 
     Args:
         bucket_id: The ID of the bucket to delete (from list_buckets).
-        etag: The current @odata.etag of the bucket. Retries once automatically if
-            the etag is stale (412 Precondition Failed). A 409 caused by a non-empty
-            bucket is NOT retried — empty the bucket first.
+        etag: The current @odata.etag of the bucket. BucketService retries once
+            with a refreshed ETag on 412 Precondition Failed or 409 Conflict.
+            A 409 from a non-empty bucket is caught by the pre-flight check
+            before the service is called — empty the bucket first.
 
     Returns:
         A dict confirming deletion: {"deleted": true, "id": "<bucket_id>"}.

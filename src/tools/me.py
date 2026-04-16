@@ -11,8 +11,7 @@ from ..services.base import BasePlannerService
 me_router = FastMCP("me")
 
 # readOnlyHint=True signals to the MCP client that this tool never mutates
-# state, so the client (e.g. Claude, MCP Inspector) can skip confirmation
-# prompts. Without it, clients treat the tool as potentially destructive.
+# state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @me_router.tool(name="get_me", annotations={"readOnlyHint": True})
 async def get_me() -> dict | None:
