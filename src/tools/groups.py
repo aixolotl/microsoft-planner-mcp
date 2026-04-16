@@ -25,6 +25,11 @@ groups_router = FastMCP("groups")
 async def list_my_groups(
     select: Annotated[str | None, "Comma-separated list of Group fields to include. Pass '*all' for all fields."] = "id,displayName,mail",
     filter: Annotated[str | None, "OData filter string, e.g. \"startsWith(displayName,'Project')\"."] = None,
+    # NOTE: An `expand` parameter was previously exposed here but has been
+    # intentionally removed. The /me/transitiveMemberOf/microsoft.graph.group
+    # endpoint does not support $expand — Graph returns a 400 BadRequest when
+    # it is included. If group expansion is needed in future, use a separate
+    # per-group GET with $expand instead.
 ) -> list[dict] | list[Group] | None:
     token = get_access_token()
     if token is None:

@@ -182,7 +182,11 @@ async def test_delete_bucket_calls_sdk(graph_ctx):
         await delete_bucket("bucket-1", '"etag-v1"')
 
     graph_client.planner.buckets.by_planner_bucket_id.assert_called_once_with("bucket-1")
-    graph_client.planner.buckets.by_planner_bucket_id.return_value.delete.assert_awaited_once()
+    delete_mock = graph_client.planner.buckets.by_planner_bucket_id.return_value.delete
+    delete_mock.assert_awaited_once()
+    # Verify the ETag reaches the If-Match header on the request configuration.
+    config = delete_mock.call_args.kwargs["request_configuration"]
+    assert config.headers.get("if-match") == {'"etag-v1"'}
 
 
 async def test_delete_bucket_forwards_obo_token(token_capturing_ctx):

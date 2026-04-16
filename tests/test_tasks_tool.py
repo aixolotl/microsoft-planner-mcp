@@ -333,7 +333,11 @@ async def test_delete_task_delegates_to_sdk(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await delete_task("task-1", '"etag-v1"')
 
-    graph_client.planner.tasks.by_planner_task_id.return_value.delete.assert_awaited_once()
+    delete_mock = graph_client.planner.tasks.by_planner_task_id.return_value.delete
+    delete_mock.assert_awaited_once()
+    # Verify the ETag reaches the If-Match header on the request configuration.
+    config = delete_mock.call_args.kwargs["request_configuration"]
+    assert config.headers.get("if-match") == {'"etag-v1"'}
     assert result is None
 
 

@@ -110,8 +110,8 @@ async def delete_bucket(
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
         item = graph_client.planner.buckets.by_planner_bucket_id(bucket_id)
-        await svc._with_retry(
+        await svc.with_retry(
             etag,
-            lambda e: item.delete(request_configuration=svc._make_config(e)),
-            lambda: svc._refresh_etag(item.get(), f"bucket {bucket_id!r}"),
+            lambda e: item.delete(request_configuration=svc.make_config(e)),
+            lambda: svc.refresh_etag(item.get, f"bucket {bucket_id!r}"),
         )

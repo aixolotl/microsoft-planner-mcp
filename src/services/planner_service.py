@@ -76,7 +76,7 @@ class PlannerService:
         return [self.serialize_graph_object(item) for item in items]
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Request helpers
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -113,7 +113,7 @@ class PlannerService:
         return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
 
     @staticmethod
-    def _make_config(etag: str, *, prefer_representation: bool = False) -> RequestConfiguration:
+    def make_config(etag: str, *, prefer_representation: bool = False) -> RequestConfiguration:
         """Build a RequestConfiguration with If-Match and optionally Prefer: return=representation.
 
         HeadersCollection must be passed explicitly — RequestConfiguration uses
@@ -136,20 +136,25 @@ class PlannerService:
         return RequestConfiguration(headers=headers)
 
     @staticmethod
-    async def _refresh_etag(get_coro: Awaitable[Any], label: str) -> str:
+    async def refresh_etag(get_fn: Callable[[], Awaitable[Any]], label: str) -> str:
         """GET a resource and return its current @odata.etag value.
 
         Consolidates the per-resource refresh helpers into a single function.
         Without a current ETag, Graph rejects PATCH/DELETE with 428 Precondition
         Required. The label is used only in the ValueError message on failure.
+
+        Accepts a zero-arg callable that returns an awaitable (e.g. ``item.get``)
+        rather than a pre-built coroutine. This ensures a fresh coroutine is
+        created on each invocation — awaiting the same coroutine twice raises
+        ``RuntimeError: cannot reuse already awaited coroutine``.
         """
-        obj = await get_coro
+        obj = await get_fn()
         etag: str | None = obj.additional_data.get("@odata.etag") if obj else None
         if not etag:
             raise ValueError(f"No @odata.etag found on {label}")
         return etag
 
-    async def _with_retry(self, etag: str, operation: Callable[[str], Awaitable[T]], refresh: Callable[[], Awaitable[str]]) -> T:
+    async def with_retry(self, etag: str, operation: Callable[[str], Awaitable[T]], refresh: Callable[[], Awaitable[str]]) -> T:
         """Run ``operation(etag)``, retrying once with a fresh ETag on 412/409."""
         try:
             return await operation(etag)
