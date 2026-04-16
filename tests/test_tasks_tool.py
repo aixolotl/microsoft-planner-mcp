@@ -468,3 +468,53 @@ async def test_create_task_odata_error(status, code, exc_type, graph_ctx, make_o
         assert code in str(exc_info.value)
     else:
         assert exc_info.value.response_status_code == status
+
+
+# ---------------------------------------------------------------------------
+# Tests: Bug 015 — list_tasks 404 for invalid plan_id converts to ValueError
+# ---------------------------------------------------------------------------
+
+
+async def test_list_tasks_404_raises_value_error(graph_ctx, make_odata_error):
+    # Bug 015: 404 from list_tasks with a non-existent plan_id was surfacing as
+    # a raw 'Internal error'. It must now be a clear ValueError.
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.tasks.get = AsyncMock(
+        side_effect=make_odata_error(404, "NotFound")
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match="not found"):
+            await list_tasks("nonexistent-plan-id")
+
+
+async def test_list_tasks_500_reraises(graph_ctx, make_odata_error):
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.tasks.get = AsyncMock(
+        side_effect=make_odata_error(500, "ServiceError")
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ODataError):
+            await list_tasks("plan-1")
+
+
+# ---------------------------------------------------------------------------
+# Tests: Bug 016 — comma-only select resolves to zero fields after split
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_select", [", ,", ",", " , "], ids=["comma-space", "bare-comma", "space-comma-space"])
+async def test_list_my_tasks_comma_only_select_raises_value_error(bad_select, graph_ctx):
+    graph_client, _ = make_capturing_client()
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match="resolved to no fields"):
+            await list_my_tasks(select=bad_select)
+
+
+@pytest.mark.parametrize("bad_select", [", ,", ",", " , "], ids=["comma-space", "bare-comma", "space-comma-space"])
+async def test_list_tasks_comma_only_select_raises_value_error(bad_select, graph_ctx):
+    graph_client, _ = make_plan_capturing_client()
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match="resolved to no fields"):
+            await list_tasks("plan-1", select=bad_select)

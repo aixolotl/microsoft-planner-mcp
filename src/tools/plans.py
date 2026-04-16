@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Annotated
+
+from pydantic import Field
+
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
@@ -20,7 +24,20 @@ plans_router = FastMCP("plans")
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @plans_router.tool(name="list_my_plans", annotations={"readOnlyHint": True})
 async def list_my_plans(
-    select: str | None = "id,title,owner,createdBy,createdDateTime",
+    select: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Comma-separated PlannerPlan fields to return. "
+                "Default: 'id,title,owner,createdBy,createdDateTime'. "
+                "Pass '*all' for all fields."
+            ),
+            # FastMCP/Pydantic enforces min_length=1, rejecting "" before the
+            # function body runs.
+            # Docs: https://gofastmcp.com/servers/tools#advanced-metadata-with-field
+            min_length=1,
+        ),
+    ] = "id,title,owner,createdBy,createdDateTime",
 ) -> list[dict] | None:
     """List Planner plans directly associated with the authenticated user.
 
@@ -43,11 +60,8 @@ async def list_my_plans(
     if ctx is not None:
         await ctx.info("Fetching Planner plans for the authenticated user")
 
-    if select is not None and not select.strip():
-        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
-    # "*all" is a sentinel that bypasses $select entirely so Graph returns
-    # every field. Passing select=None to the SDK achieves this — the SDK
-    # omits the $select query parameter from the request URL.
+    # "" is rejected at the MCP protocol level by Field(min_length=1) above.
+    # "*all" sentinel bypasses $select so Graph returns every field.
     # Docs: https://learn.microsoft.com/en-us/graph/query-parameters#select-parameter
     if select == "*all":
         select = None
@@ -61,6 +75,14 @@ async def list_my_plans(
         if select is not None
         else None
     )
+    # Guard: comma-only strings (", ,") survive min_length=1 but produce zero
+    # tokens after split — silently omitting $select. Reject explicitly.
+    # Docs: https://gofastmcp.com/servers/tools#advanced-metadata-with-field
+    if select_fields is not None and not select_fields:
+        raise ValueError(
+            f"select resolved to no fields after parsing (input: {select!r}). "
+            "Pass None or '*all' to return all fields."
+        )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
@@ -90,9 +112,22 @@ async def list_my_plans(
 
 @plans_router.tool(name="list_group_plans", annotations={"readOnlyHint": True})
 async def list_group_plans(
-    group_id: str,
-    select: str | None = "id,title,owner,createdBy,createdDateTime"
-    ) -> list[dict] | None:
+    group_id: Annotated[
+        str,
+        Field(description="The object ID of the group (from list_my_groups)."),
+    ],
+    select: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Comma-separated PlannerPlan fields to return. "
+                "Default: 'id,title,owner,createdBy,createdDateTime'. "
+                "Pass '*all' for all fields."
+            ),
+            min_length=1,
+        ),
+    ] = "id,title,owner,createdBy,createdDateTime",
+) -> list[dict] | None:
     """List all Planner plans belonging to a Microsoft 365 group.
 
     Args:
@@ -111,8 +146,7 @@ async def list_group_plans(
     if ctx is not None:
         await ctx.info(f"Fetching Planner plans for group {group_id}")
 
-    if select is not None and not select.strip():
-        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
+    # "" is rejected at the MCP protocol level by Field(min_length=1) above.
     # "*all" sentinel — see list_my_plans for rationale.
     # Docs: https://learn.microsoft.com/en-us/graph/query-parameters#select-parameter
     if select == "*all":
@@ -125,6 +159,14 @@ async def list_group_plans(
         if select is not None
         else None
     )
+    # Guard: comma-only strings (", ,") survive min_length=1 but produce zero
+    # tokens after split — silently omitting $select. Reject explicitly.
+    # Docs: https://gofastmcp.com/servers/tools#advanced-metadata-with-field
+    if select_fields is not None and not select_fields:
+        raise ValueError(
+            f"select resolved to no fields after parsing (input: {select!r}). "
+            "Pass None or '*all' to return all fields."
+        )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:

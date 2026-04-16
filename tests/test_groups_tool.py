@@ -145,3 +145,52 @@ async def test_all_sentinel_omits_select(graph_ctx):
 
     config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
     assert config.query_parameters.select is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: Bug 014 — $expand errors (403, 404) convert to ValueError
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("status,match", [
+    (403, "Insufficient privileges"),
+    (404, "Navigation property not found"),
+], ids=["expand-403", "expand-404"])
+async def test_expand_odata_error_raises_value_error(status, match, graph_ctx, make_odata_error):
+    # Bug 014: 403/404 from $expand were surfacing as raw 'Internal error'.
+    # They must now be converted to ValueError with a readable message.
+    graph_client = MagicMock()
+    graph_client.me.transitive_member_of.graph_group.get = AsyncMock(
+        side_effect=make_odata_error(status, "SomeCode", "Graph message")
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match=match):
+            await list_my_groups(expand="members($select=id)")
+
+
+async def test_non_400_403_404_odata_error_reraises(graph_ctx, make_odata_error):
+    from msgraph.generated.models.o_data_errors.o_data_error import ODataError
+    graph_client = MagicMock()
+    graph_client.me.transitive_member_of.graph_group.get = AsyncMock(
+        side_effect=make_odata_error(500, "ServiceError")
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ODataError):
+            await list_my_groups()
+
+
+# ---------------------------------------------------------------------------
+# Tests: Bug 016 — comma-only select resolves to zero fields after split
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_select", [", ,", ",", " , "], ids=["comma-space", "bare-comma", "space-comma-space"])
+async def test_comma_only_select_raises_value_error(bad_select, graph_ctx):
+    # Bug 016: strings like ", ," survive min_length=1 but split to zero tokens.
+    # The post-split guard must reject them before any Graph call is made.
+    graph_client = MagicMock()
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match="resolved to no fields"):
+            await list_my_groups(select=bad_select)

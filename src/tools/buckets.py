@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Annotated
+
+from pydantic import Field
+
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
@@ -19,7 +23,12 @@ buckets_router = FastMCP("buckets")
 # state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @buckets_router.tool(name="list_buckets", annotations={"readOnlyHint": True})
-async def list_buckets(plan_id: str) -> list[dict] | None:
+async def list_buckets(
+    plan_id: Annotated[
+        str,
+        Field(description="The plan ID to list buckets for (from list_my_plans or list_group_plans)."),
+    ],
+) -> list[dict] | None:
     """List all buckets in a Planner plan.
 
     Args:
@@ -61,7 +70,16 @@ async def list_buckets(plan_id: str) -> list[dict] | None:
 
 
 @buckets_router.tool(name="create_bucket")
-async def create_bucket(plan_id: str, name: str) -> dict | None:
+async def create_bucket(
+    plan_id: Annotated[
+        str,
+        Field(description="The plan ID to create the bucket in (from list_my_plans or list_group_plans)."),
+    ],
+    name: Annotated[
+        str,
+        Field(description="The display name for the new bucket.", min_length=1),
+    ],
+) -> dict | None:
     """Create a new bucket in a Planner plan.
 
     Args:
@@ -102,8 +120,23 @@ async def create_bucket(plan_id: str, name: str) -> dict | None:
     return BucketService.serialize_graph_object(bucket)
 
 
-@buckets_router.tool(name="delete_bucket")
-async def delete_bucket(bucket_id: str, etag: str) -> dict:
+@buckets_router.tool(name="delete_bucket", annotations={"destructiveHint": True})
+async def delete_bucket(
+    bucket_id: Annotated[
+        str,
+        Field(description="The ID of the bucket to delete (from list_buckets)."),
+    ],
+    etag: Annotated[
+        str,
+        Field(
+            description=(
+                "The current @odata.etag of the bucket. Retries once automatically if "
+                "the etag is stale (412 Precondition Failed). A 409 caused by a non-empty "
+                "bucket is NOT retried — empty the bucket first."
+            )
+        ),
+    ],
+) -> dict:
     """Delete a Planner bucket.
 
     Note: the bucket must be empty (contain no tasks) before it can be deleted.

@@ -210,6 +210,30 @@ async def test_list_group_plans_forwards_obo_token(token_capturing_ctx):
 
 
 # ---------------------------------------------------------------------------
+# Tests: Bug 016 — comma-only select resolves to zero fields after split
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("bad_select", [", ,", ",", " , "], ids=["comma-space", "bare-comma", "space-comma-space"])
+async def test_list_my_plans_comma_only_select_raises_value_error(bad_select, graph_ctx):
+    graph_client, _ = make_capturing_client()
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match="resolved to no fields"):
+            await list_my_plans(select=bad_select)
+
+
+@pytest.mark.parametrize("bad_select", [", ,", ",", " , "], ids=["comma-space", "bare-comma", "space-comma-space"])
+async def test_list_group_plans_comma_only_select_raises_value_error(bad_select, graph_ctx):
+    graph_client = MagicMock()
+    graph_client.groups.by_group_id.return_value.planner.plans.get = AsyncMock(
+        return_value=make_plans_result([])
+    )
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match="resolved to no fields"):
+            await list_group_plans("group-1", select=bad_select)
+
+
+# ---------------------------------------------------------------------------
 # Tests: create_plan
 # ---------------------------------------------------------------------------
 

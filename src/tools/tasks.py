@@ -35,7 +35,20 @@ tasks_router = FastMCP("tasks")
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="list_my_tasks", annotations={"readOnlyHint": True})
 async def list_my_tasks(
-    select: str | None = "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments",
+    select: Annotated[
+        str | None,
+        # FastMCP/Pydantic enforces min_length=1 at the MCP protocol level,
+        # rejecting "" before the function body runs.
+        # Docs: https://gofastmcp.com/servers/tools#advanced-metadata-with-field
+        Field(
+            description=(
+                "Comma-separated PlannerTask fields to return. "
+                "Default: 'id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments'. "
+                "Pass '*all' for all fields."
+            ),
+            min_length=1,
+        ),
+    ] = "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments",
 ) -> list[dict] | None:
     """List all Planner tasks assigned to the authenticated user across all plans.
 
@@ -54,32 +67,28 @@ async def list_my_tasks(
     if ctx is not None:
         await ctx.info("Fetching tasks assigned to the authenticated user")
 
-    # An empty string for select is ambiguous — it could mean "no fields" or
-    # "use the default", but the SDK treats it as omitting $select entirely,
-    # returning ALL fields. Reject it explicitly so callers get a clear error
-    # rather than silently receiving more data than expected. Without this
-    # guard, split(",") on "" yields [""] which after the strip/filter produces
-    # [], and the SDK omits $select just as if select=None were passed.
+    # "" is rejected at the MCP protocol level by Field(min_length=1) above.
+    # "*all" sentinel bypasses $select so Graph returns every task field.
     # Docs: https://learn.microsoft.com/en-us/graph/query-parameters#select-parameter
-    if select is not None and not select.strip():
-        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
-    # "*all" is a sentinel that tells the tool to omit $select entirely so
-    # Graph returns every task field. Without the sentinel, callers would have
-    # to set select=None explicitly, which is less ergonomic for LLM agents.
     if select == "*all":
         select = None
 
-    # The Graph SDK's $select parameter is a list[str], not a comma-separated
-    # string. Kiota codegen emits QueryParameters dataclasses that accept
-    # list[str] for multi-value OData params. Without the split, passing
-    # "id,title" as a single string would send ?$select=id%2Ctitle (one field
-    # named "id,title") instead of ?$select=id,title (two fields).
+    # Kiota QueryParameters dataclasses take list[str] for $select, not CSV.
     # Docs: https://github.com/microsoft/kiota-abstractions-python
     select_fields = (
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
         else None
     )
+    # Guard: whitespace-only ("   ") and comma-only (", ,") strings survive
+    # min_length=1 but resolve to zero tokens after split — they would silently
+    # omit $select and return ALL fields. Reject them explicitly.
+    # Docs: https://gofastmcp.com/servers/tools#advanced-metadata-with-field
+    if select_fields is not None and not select_fields:
+        raise ValueError(
+            f"select resolved to no fields after parsing (input: {select!r}). "
+            "Pass None or '*all' to return all fields."
+        )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
@@ -112,8 +121,21 @@ async def list_my_tasks(
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="list_tasks", annotations={"readOnlyHint": True})
 async def list_tasks(
-    plan_id: str,
-    select: str | None = "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments",
+    plan_id: Annotated[
+        str,
+        Field(description="The plan ID to list tasks for (from list_my_plans or list_group_plans)."),
+    ],
+    select: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Comma-separated PlannerTask fields to return. "
+                "Default: 'id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments'. "
+                "Pass '*all' for all fields."
+            ),
+            min_length=1,
+        ),
+    ] = "id,title,planId,bucketId,percentComplete,startDateTime,dueDateTime,assignments",
 ) -> list[dict] | None:
     """List all tasks in a Planner plan.
 
@@ -133,8 +155,7 @@ async def list_tasks(
     if ctx is not None:
         await ctx.info(f"Fetching tasks for plan {plan_id}")
 
-    if select is not None and not select.strip():
-        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
+    # "" is rejected at the MCP protocol level by Field(min_length=1) above.
     # "*all" sentinel — see list_my_tasks for rationale.
     if select == "*all":
         select = None
@@ -146,6 +167,14 @@ async def list_tasks(
         if select is not None
         else None
     )
+    # Guard: comma-only strings (", ,") survive min_length=1 but produce zero
+    # tokens after split — silently omitting $select. Reject explicitly.
+    # Docs: https://gofastmcp.com/servers/tools#advanced-metadata-with-field
+    if select_fields is not None and not select_fields:
+        raise ValueError(
+            f"select resolved to no fields after parsing (input: {select!r}). "
+            "Pass None or '*all' to return all fields."
+        )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
@@ -158,13 +187,16 @@ async def list_tasks(
                 ),
             )
         except ODataError as exc:
-            # 400 from $select with an unrecognised field name; surface as
-            # ValueError. Without this, callers see a raw APIError stack trace.
+            # 400: $select contained an unrecognised field name.
+            # 404: plan_id does not exist.
+            # Docs: https://learn.microsoft.com/en-us/graph/api/plannerplan-list-tasks
             # Docs: https://learn.microsoft.com/en-us/graph/errors
-            if exc.response_status_code != 400:
-                raise
-            msg = exc.error.message if exc.error else exc.primary_message
-            raise ValueError(f"Invalid select: {msg}") from exc
+            if exc.response_status_code == 400:
+                msg = exc.error.message if exc.error else exc.primary_message
+                raise ValueError(f"Invalid select: {msg}") from exc
+            if exc.response_status_code == 404:
+                raise ValueError(f"Plan '{plan_id}' not found.") from exc
+            raise
 
     if ctx is not None:
         await ctx.info(f"Found {len(tasks)} task(s) in plan {plan_id}")

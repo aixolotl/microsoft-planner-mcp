@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from typing import Annotated
+
+from pydantic import Field
+
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
@@ -17,9 +21,37 @@ groups_router = FastMCP("groups")
 
 @groups_router.tool(name="list_my_groups", annotations={"readOnlyHint": True})
 async def list_my_groups(
-    select: str | None = "id,displayName,mail",
-    filter: str | None = None,
-    expand: str | None = None,
+    select: Annotated[
+        str | None,
+        # FastMCP/Pydantic enforces min_length=1 at the MCP protocol level,
+        # rejecting "" before the function body runs.
+        # Docs: https://gofastmcp.com/servers/tools#advanced-metadata-with-field
+        Field(
+            description=(
+                "Comma-separated Group fields to return. "
+                "Default: 'id,displayName,mail'. Pass '*all' for all fields."
+            ),
+            min_length=1,
+        ),
+    ] = "id,displayName,mail",
+    filter: Annotated[
+        str | None,
+        Field(
+            description=(
+                "OData $filter expression, e.g. \"startsWith(displayName,'Project')\". "
+                "Note: $filter on transitiveMemberOf always returns 400."
+            ),
+        ),
+    ] = None,
+    expand: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Navigation properties to expand, e.g. \"members($select=id,displayName)\". "
+                "Expanding members or owners requires GroupMember.Read.All."
+            ),
+        ),
+    ] = None,
 ) -> list[dict] | None:
     """List all Microsoft 365 groups the authenticated user is a member of.
     
@@ -41,11 +73,8 @@ async def list_my_groups(
     if ctx is not None:
         await ctx.debug("Fetching Microsoft 365 group memberships for the authenticated user")
 
-    if select is not None and not select.strip():
-        raise ValueError("select cannot be an empty string; pass None or '*all' to return all fields")
-    # "*all" is a sentinel that bypasses $select entirely so Graph returns
-    # every field. Passing select=None to the SDK achieves this — the SDK
-    # omits the $select query parameter from the request URL.
+    # "" is rejected at the MCP protocol level by Field(min_length=1) above.
+    # "*all" sentinel bypasses $select so Graph returns every field.
     # Docs: https://learn.microsoft.com/en-us/graph/query-parameters#select-parameter
     if select == "*all":
         select = None
@@ -58,8 +87,15 @@ async def list_my_groups(
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
         else None
-    )
-    # $expand also requires a list[str]. Split the caller-supplied CSV the same
+    )    # Guard: whitespace-only ("   ") and comma-only (", ,") strings survive
+    # min_length=1 but resolve to zero tokens after split — they would silently
+    # omit $select and return ALL fields. Reject them explicitly.
+    # Docs: https://gofastmcp.com/servers/tools#advanced-metadata-with-field
+    if select_fields is not None and not select_fields:
+        raise ValueError(
+            f"select resolved to no fields after parsing (input: {select!r}). "
+            "Pass None or '*all' to return all fields."
+        )    # $expand also requires a list[str]. Split the caller-supplied CSV the same
     # way as $select so callers don’t need to know the SDK’s internal shape.
     expand_fields = (
         [field.strip() for field in expand.split(",") if field.strip()]
@@ -96,18 +132,31 @@ async def list_my_groups(
                 ),
             )
         except ODataError as exc:
-            # 400 from this endpoint has two common causes:
-            #   (a) $select or $expand used an unrecognised field/navigation property.
-            #   (b) $filter was supplied without the required ConsistencyLevel header
-            #       (transitiveMemberOf does not support $filter at all).
-            # Either way, surface the Graph error message as a ValueError so the
-            # LLM gets readable text rather than a raw APIError stack trace.
-            # Without this catch, a bad $expand such as "plans" returns a raw 400.
+            # Convert all ODataErrors to ValueError so the LLM receives readable
+            # text rather than a raw APIError stack trace.
+            # Docs: https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof#optional-query-parameters
             # Docs: https://learn.microsoft.com/en-us/graph/errors
-            if exc.response_status_code != 400:
-                raise
+            code = exc.response_status_code
             msg = exc.error.message if exc.error else exc.primary_message
-            raise ValueError(f"Invalid query parameter: {msg}") from exc
+            if code == 400:
+                # (a) $select/$expand referenced an unknown field/navigation property.
+                # (b) $filter used — transitiveMemberOf does not support $filter.
+                raise ValueError(f"Invalid query parameter: {msg}") from exc
+            if code == 403:
+                # User lacks permission to expand (e.g. GroupMember.Read.All
+                # required for $expand=members or $expand=owners).
+                raise ValueError(
+                    f"Insufficient privileges: {msg}. "
+                    "Expanding member or owner navigation properties requires "
+                    "GroupMember.Read.All or Member.Read.Hidden.All."
+                ) from exc
+            if code == 404:
+                # $expand referenced a navigation property not available on
+                # the Group resource at the transitiveMemberOf endpoint.
+                raise ValueError(
+                    f"Navigation property not found (expand='{expand}'): {msg}."
+                ) from exc
+            raise
 
     if ctx is not None:
         await ctx.debug(f"Found {len(groups)} group(s)")
