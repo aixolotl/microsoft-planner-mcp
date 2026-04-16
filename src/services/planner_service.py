@@ -24,8 +24,6 @@ from kiota_abstractions.headers_collection import HeadersCollection
 from kiota_serialization_json.json_serialization_writer import JsonSerializationWriter
 from msgraph import GraphServiceClient
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
-from msgraph.generated.models.planner_task import PlannerTask
-from msgraph.generated.models.planner_task_details import PlannerTaskDetails
 from msgraph_core.tasks.page_iterator import PageIterator
 
 from ..types import CollectionRequestBuilder
@@ -137,36 +135,18 @@ class PlannerService:
             headers.add("Prefer", "return=representation")
         return RequestConfiguration(headers=headers)
 
-    async def _refresh_task_etag(self, task_id: str) -> str:
-        """GET the task and return the current @odata.etag value."""
-        task = await self._client.planner.tasks.by_planner_task_id(task_id).get()
-        etag: str | None = task.additional_data.get("@odata.etag") if task else None
-        if not etag:
-            raise ValueError(f"No @odata.etag found on task {task_id!r}")
-        return etag
+    @staticmethod
+    async def _refresh_etag(get_coro: Awaitable[Any], label: str) -> str:
+        """GET a resource and return its current @odata.etag value.
 
-    async def _refresh_details_etag(self, task_id: str) -> str:
-        """GET the task details and return the current @odata.etag value."""
-        details = await self._client.planner.tasks.by_planner_task_id(task_id).details.get()
-        etag: str | None = details.additional_data.get("@odata.etag") if details else None
+        Consolidates the per-resource refresh helpers into a single function.
+        Without a current ETag, Graph rejects PATCH/DELETE with 428 Precondition
+        Required. The label is used only in the ValueError message on failure.
+        """
+        obj = await get_coro
+        etag: str | None = obj.additional_data.get("@odata.etag") if obj else None
         if not etag:
-            raise ValueError(f"No @odata.etag found on task details {task_id!r}")
-        return etag
-
-    async def _refresh_plan_etag(self, plan_id: str) -> str:
-        """GET the plan and return the current @odata.etag value."""
-        plan = await self._client.planner.plans.by_planner_plan_id(plan_id).get()
-        etag: str | None = plan.additional_data.get("@odata.etag") if plan else None
-        if not etag:
-            raise ValueError(f"No @odata.etag found on plan {plan_id!r}")
-        return etag
-
-    async def _refresh_bucket_etag(self, bucket_id: str) -> str:
-        """GET the bucket and return the current @odata.etag value."""
-        bucket = await self._client.planner.buckets.by_planner_bucket_id(bucket_id).get()
-        etag: str | None = bucket.additional_data.get("@odata.etag") if bucket else None
-        if not etag:
-            raise ValueError(f"No @odata.etag found on bucket {bucket_id!r}")
+            raise ValueError(f"No @odata.etag found on {label}")
         return etag
 
     async def _with_retry(self, etag: str, operation: Callable[[str], Awaitable[T]], refresh: Callable[[], Awaitable[str]]) -> T:
@@ -185,62 +165,3 @@ class PlannerService:
             if exc.response_status_code not in (409, 412):
                 raise
             return await operation(await refresh())
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
-    async def patch_task(
-        self,
-        task_id: str,
-        body: PlannerTask,
-        etag: str,
-    ) -> PlannerTask | None:
-        """PATCH a task.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.tasks.by_planner_task_id(task_id)
-        return await self._with_retry(
-            etag,
-            lambda e: item.patch(body, request_configuration=self._make_config(e, prefer_representation=True)),
-            lambda: self._refresh_task_etag(task_id),
-        )
-
-    async def delete_task(self, task_id: str, etag: str) -> None:
-        """DELETE a task.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.tasks.by_planner_task_id(task_id)
-        await self._with_retry(
-            etag,
-            lambda e: item.delete(request_configuration=self._make_config(e)),
-            lambda: self._refresh_task_etag(task_id),
-        )
-
-    async def patch_task_details(
-        self,
-        task_id: str,
-        body: PlannerTaskDetails,
-        etag: str,
-    ) -> PlannerTaskDetails | None:
-        """PATCH task details.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.tasks.by_planner_task_id(task_id).details
-        return await self._with_retry(
-            etag,
-            lambda e: item.patch(body, request_configuration=self._make_config(e, prefer_representation=True)),
-            lambda: self._refresh_details_etag(task_id),
-        )
-
-    async def delete_plan(self, plan_id: str, etag: str) -> None:
-        """DELETE a plan.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.plans.by_planner_plan_id(plan_id)
-        await self._with_retry(
-            etag,
-            lambda e: item.delete(request_configuration=self._make_config(e)),
-            lambda: self._refresh_plan_etag(plan_id),
-        )
-
-    async def delete_bucket(self, bucket_id: str, etag: str) -> None:
-        """DELETE a bucket.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.buckets.by_planner_bucket_id(bucket_id)
-        await self._with_retry(
-            etag,
-            lambda e: item.delete(request_configuration=self._make_config(e)),
-            lambda: self._refresh_bucket_etag(bucket_id),
-        )

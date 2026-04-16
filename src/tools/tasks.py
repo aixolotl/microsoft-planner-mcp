@@ -262,7 +262,12 @@ async def update_task(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        result = await svc.patch_task(task_id, body, etag)
+        item = graph_client.planner.tasks.by_planner_task_id(task_id)
+        result = await svc._with_retry(
+            etag,
+            lambda e: item.patch(body, request_configuration=svc._make_config(e, prefer_representation=True)),
+            lambda: svc._refresh_etag(item.get(), f"task {task_id!r}"),
+        )
         return svc.serialize_graph_object(result) if result else None
 
 
@@ -293,8 +298,13 @@ async def update_task_details(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
+        item = graph_client.planner.tasks.by_planner_task_id(task_id).details
         try:
-            result = await svc.patch_task_details(task_id, body, etag)
+            result = await svc._with_retry(
+                etag,
+                lambda e: item.patch(body, request_configuration=svc._make_config(e, prefer_representation=True)),
+                lambda: svc._refresh_etag(item.get(), f"task details {task_id!r}"),
+            )
             return svc.serialize_graph_object(result) if result else None
         except ODataError as exc:
             if exc.response_status_code == 403:
@@ -320,4 +330,9 @@ async def delete_task(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        await svc.delete_task(task_id, etag)
+        item = graph_client.planner.tasks.by_planner_task_id(task_id)
+        await svc._with_retry(
+            etag,
+            lambda e: item.delete(request_configuration=svc._make_config(e)),
+            lambda: svc._refresh_etag(item.get(), f"task {task_id!r}"),
+        )

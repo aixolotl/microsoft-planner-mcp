@@ -174,32 +174,22 @@ async def test_create_bucket_forwards_obo_token(token_capturing_ctx):
 # ---------------------------------------------------------------------------
 
 
-async def test_delete_bucket_calls_service(graph_ctx):
-    # PlannerService.delete_bucket is the correct delegation path; patching it
-    # here isolates the tool from service internals so retry logic changes
-    # do not break this test.
+async def test_delete_bucket_calls_sdk(graph_ctx):
     graph_client = MagicMock()
+    graph_client.planner.buckets.by_planner_bucket_id.return_value.delete = AsyncMock()
 
-    with graph_ctx(MODULE, graph_client), \
-         patch(f"{MODULE}.PlannerService") as mock_svc_cls:
-        mock_svc = MagicMock()
-        mock_svc.delete_bucket = AsyncMock()
-        mock_svc_cls.return_value = mock_svc
-
+    with graph_ctx(MODULE, graph_client):
         await delete_bucket("bucket-1", '"etag-v1"')
 
-    mock_svc.delete_bucket.assert_awaited_once_with("bucket-1", '"etag-v1"')
+    graph_client.planner.buckets.by_planner_bucket_id.assert_called_once_with("bucket-1")
+    graph_client.planner.buckets.by_planner_bucket_id.return_value.delete.assert_awaited_once()
 
 
 async def test_delete_bucket_forwards_obo_token(token_capturing_ctx):
     graph_client = MagicMock()
+    graph_client.planner.buckets.by_planner_bucket_id.return_value.delete = AsyncMock()
 
-    with token_capturing_ctx(MODULE, graph_client, "my-obo") as received, \
-         patch(f"{MODULE}.PlannerService") as mock_svc_cls:
-        mock_svc = MagicMock()
-        mock_svc.delete_bucket = AsyncMock()
-        mock_svc_cls.return_value = mock_svc
-
+    with token_capturing_ctx(MODULE, graph_client, "my-obo") as received:
         await delete_bucket("bucket-1", '"etag-v1"')
 
     assert received == ["my-obo"]

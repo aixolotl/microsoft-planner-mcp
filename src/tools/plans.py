@@ -189,4 +189,9 @@ async def delete_plan(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        await svc.delete_plan(plan_id, etag)
+        item = graph_client.planner.plans.by_planner_plan_id(plan_id)
+        await svc._with_retry(
+            etag,
+            lambda e: item.delete(request_configuration=svc._make_config(e)),
+            lambda: svc._refresh_etag(item.get(), f"plan {plan_id!r}"),
+        )
