@@ -35,7 +35,7 @@ async def list_buckets(
         plan_id: The ID of the plan to list buckets for (from list_my_plans or list_group_plans).
 
     Returns:
-        A list of PlannerBucket objects, or None if the plan has no buckets.
+        A list of serialized bucket dicts, or None if the plan has no buckets.
     """
     token = get_access_token()
     if token is None:
@@ -87,7 +87,7 @@ async def create_bucket(
         name: The display name for the new bucket.
 
     Returns:
-        The created PlannerBucket object.
+        The created bucket as a serialized dict.
     """
     token = get_access_token()
     if token is None:

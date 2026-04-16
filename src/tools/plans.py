@@ -49,7 +49,7 @@ async def list_my_plans(
         select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,createdBy,createdDateTime". Pass "*all" for all fields.
 
     Returns:
-        A list of PlannerPlan objects, or None if the user has no directly-owned plans.
+        A list of serialized plan dicts, or None if the user has no directly-owned plans.
     """
     token = get_access_token()
     if token is None:
@@ -135,7 +135,7 @@ async def list_group_plans(
         select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,createdBy,createdDateTime". Pass "*all" for all fields.
 
     Returns:
-        A list of PlannerPlan objects belonging to the group, or None if the group has no plans.
+        A list of serialized plan dicts belonging to the group, or None if the group has no plans.
     """
     token = get_access_token()
     if token is None:
@@ -214,7 +214,7 @@ async def create_plan(group_id: str, title: str) -> dict | None:
         title: The display title for the new plan.
 
     Returns:
-        The created PlannerPlan object.
+        The created plan as a serialized dict.
     """
     token = get_access_token()
     if token is None:

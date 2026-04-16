@@ -78,7 +78,8 @@ async def list_my_groups(
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
         else None
-    )    # Guard: whitespace-only ("   ") and comma-only (", ,") strings survive
+    )
+    # Guard: whitespace-only ("   ") and comma-only (", ,") strings survive
     # min_length=1 but resolve to zero tokens after split — they would silently
     # omit $select and return ALL fields. Reject them explicitly.
     # Docs: https://gofastmcp.com/servers/tools#advanced-metadata-with-field
@@ -86,7 +87,8 @@ async def list_my_groups(
         raise ValueError(
             f"select resolved to no fields after parsing (input: {select!r}). "
             "Pass None or '*all' to return all fields."
-        )    # $expand also requires a list[str]. Split the caller-supplied CSV the same
+        )
+    # $expand also requires a list[str]. Split the caller-supplied CSV the same
     # way as $select so callers don’t need to know the SDK’s internal shape.
     expand_fields = (
         [field.strip() for field in expand.split(",") if field.strip()]

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, cast
 
 from pydantic import Field
 
@@ -399,7 +399,7 @@ async def update_task(
                 msg = exc.error.message if exc.error else exc.primary_message
                 raise ValueError(f"Cannot update task ({code}): {msg}") from exc
             raise
-    return task  # type: ignore[return-value]
+    return cast(dict | None, task)
 
 
 @tasks_router.tool(name="update_task_details")
@@ -448,7 +448,7 @@ async def update_task_details(
                 msg = exc.error.message if exc.error else exc.primary_message
                 raise ValueError(f"Cannot update task details ({code}): {msg}") from exc
             raise
-    return details  # type: ignore[return-value]
+    return cast(dict | None, details)
 
 
 @tasks_router.tool(name="delete_task")
