@@ -34,15 +34,6 @@ async def list_my_groups(
             min_length=1,
         ),
     ] = "id,displayName,mail",
-    filter: Annotated[
-        str | None,
-        Field(
-            description=(
-                "OData $filter expression, e.g. \"startsWith(displayName,'Project')\". "
-                "Note: $filter on transitiveMemberOf always returns 400."
-            ),
-        ),
-    ] = None,
     expand: Annotated[
         str | None,
         Field(
@@ -54,10 +45,9 @@ async def list_my_groups(
     ] = None,
 ) -> list[dict] | None:
     """List all Microsoft 365 groups the authenticated user is a member of.
-    
+
     Args:
         select: Comma-separated list of Group fields to include. Default is "id,displayName,mail". Pass "*all" for all fields.
-        filter: OData filter string to filter groups, e.g. "startsWith(displayName,'Project')". Use OData filter syntax.
         expand: Comma-separated list of related entities to expand. Use OData expand syntax, e.g. "members($select=id,displayName)".
 
     Returns:
@@ -126,7 +116,6 @@ async def list_my_groups(
                     headers=headers,
                     query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
                         select=select_fields,
-                        filter=filter,
                         expand=expand_fields,
                     )
                 ),

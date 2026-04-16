@@ -303,7 +303,16 @@ async def get_task_details(task_id: str) -> dict | None:
         await ctx.debug(f"Fetching details for task {task_id}")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        result = await graph_client.planner.tasks.by_planner_task_id(task_id).details.get()
+        try:
+            result = await graph_client.planner.tasks.by_planner_task_id(task_id).details.get()
+        except ODataError as exc:
+            if exc.response_status_code == 404:
+                raise ValueError(f"Task '{task_id}' not found.") from exc
+            if exc.response_status_code == 403:
+                code = exc.error.code if exc.error else None
+                msg = exc.error.message if exc.error else exc.primary_message
+                raise ValueError(f"Access denied reading task details ({code}): {msg}") from exc
+            raise
 
     return TaskService.serialize_graph_object(result)
 
@@ -378,7 +387,16 @@ async def update_task(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = TaskService(graph_client, serialize=True)
-        task = await svc.patch_task(task_id, body, etag)
+        try:
+            task = await svc.patch_task(task_id, body, etag)
+        except ODataError as exc:
+            if exc.response_status_code == 404:
+                raise ValueError(f"Task '{task_id}' not found.") from exc
+            if exc.response_status_code == 403:
+                code = exc.error.code if exc.error else None
+                msg = exc.error.message if exc.error else exc.primary_message
+                raise ValueError(f"Cannot update task ({code}): {msg}") from exc
+            raise
     return task  # type: ignore[return-value]
 
 
@@ -421,6 +439,8 @@ async def update_task_details(
         try:
             details = await svc.patch_task_details(task_id, body, etag)
         except ODataError as exc:
+            if exc.response_status_code == 404:
+                raise ValueError(f"Task '{task_id}' not found.") from exc
             if exc.response_status_code == 403:
                 code = exc.error.code if exc.error else None
                 msg = exc.error.message if exc.error else exc.primary_message
@@ -446,5 +466,14 @@ async def delete_task(task_id: str, etag: str) -> dict:
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = TaskService(graph_client)
-        await svc.delete_task(task_id, etag)
+        try:
+            await svc.delete_task(task_id, etag)
+        except ODataError as exc:
+            if exc.response_status_code == 404:
+                raise ValueError(f"Task '{task_id}' not found.") from exc
+            if exc.response_status_code == 403:
+                code = exc.error.code if exc.error else None
+                msg = exc.error.message if exc.error else exc.primary_message
+                raise ValueError(f"Cannot delete task ({code}): {msg}") from exc
+            raise
     return {"deleted": True, "id": task_id}
