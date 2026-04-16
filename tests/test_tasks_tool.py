@@ -305,6 +305,112 @@ async def test_update_task_details_sets_checklist_and_references(graph_ctx):
     assert body.references.additional_data == refs
 
 
+async def test_update_task_details_auto_injects_odata_type(graph_ctx):
+    """Callers should not need to know about @odata.type annotations — the
+    tool injects them automatically when missing. Without auto-injection,
+    Graph returns 400: 'The given untyped value … is invalid.'
+    Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update"""
+    graph_client = make_patch_svc(return_value=make_details())
+    # Deliberately omit @odata.type from both checklist items and references.
+    checklist = {"guid-1": {"title": "Step 1", "isChecked": False}}
+    refs = {"https%3A//example%2Ecom": {"alias": "Ref"}}
+
+    with graph_ctx(MODULE, graph_client):
+        await update_task_details("task-1", '"etag-v1"', checklist_items=checklist, references=refs)
+
+    body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
+    assert body.checklist.additional_data["guid-1"]["@odata.type"] == "microsoft.graph.plannerChecklistItem"
+    assert body.references.additional_data["https%3A//example%2Ecom"]["@odata.type"] == "microsoft.graph.plannerExternalReference"
+
+
+async def test_update_task_details_preserves_explicit_odata_type(graph_ctx):
+    """When callers already provide @odata.type, the tool must not overwrite it."""
+    graph_client = make_patch_svc(return_value=make_details())
+    checklist = {"guid-1": {"@odata.type": "#microsoft.graph.plannerChecklistItem", "title": "Step 1", "isChecked": False}}
+
+    with graph_ctx(MODULE, graph_client):
+        await update_task_details("task-1", '"etag-v1"', checklist_items=checklist)
+
+    body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
+    # The explicit #-prefixed type must be preserved, not replaced with the un-prefixed default.
+    assert body.checklist.additional_data["guid-1"]["@odata.type"] == "#microsoft.graph.plannerChecklistItem"
+
+
+async def test_update_task_details_null_delete_entries_unaffected(graph_ctx):
+    """Null values (used to delete a checklist item or reference) must pass
+    through without modification — they are not dicts and have no @odata.type."""
+    graph_client = make_patch_svc(return_value=make_details())
+    checklist = {"guid-to-delete": None, "guid-keep": {"title": "Keep", "isChecked": False}}
+
+    with graph_ctx(MODULE, graph_client):
+        await update_task_details("task-1", '"etag-v1"', checklist_items=checklist)
+
+    body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
+    assert body.checklist.additional_data["guid-to-delete"] is None
+    assert body.checklist.additional_data["guid-keep"]["@odata.type"] == "microsoft.graph.plannerChecklistItem"
+
+
+async def test_update_task_details_does_not_mutate_caller_dicts(graph_ctx):
+    """The tool copies dicts before injecting @odata.type. Without the copy,
+    callers that reuse the dict would see unexpected extra keys."""
+    graph_client = make_patch_svc(return_value=make_details())
+    checklist = {"guid-1": {"title": "Step 1", "isChecked": False}}
+    refs = {"https%3A//example%2Ecom": {"alias": "Ref"}}
+
+    with graph_ctx(MODULE, graph_client):
+        await update_task_details("task-1", '"etag-v1"', checklist_items=checklist, references=refs)
+
+    # Caller's original dicts must not have @odata.type injected into them.
+    assert "@odata.type" not in checklist["guid-1"]
+    assert "@odata.type" not in refs["https%3A//example%2Ecom"]
+
+
+@pytest.mark.parametrize("raw_key,expected_key", [
+    ("https://example.com", "https%3A//example%2Ecom"),
+    ("http://dev.microsoft.com/path", "http%3A//dev%2Emicrosoft%2Ecom/path"),
+    ("https%3A//already%2Eencoded%2Ecom", "https%3A//already%2Eencoded%2Ecom"),
+    ("https://example.com?a=1&b=2#section", "https%3A//example%2Ecom?a=1&b=2#section"),
+], ids=["raw-url", "raw-url-with-dots", "already-encoded", "url-with-query-and-fragment"])
+async def test_update_task_details_encodes_reference_keys(raw_key, expected_key, graph_ctx):
+    """Reference keys must have ':' and '.' encoded per Graph Planner convention.
+    LLM callers typically send raw URLs; the tool encodes them automatically.
+    Already-encoded keys must pass through unchanged (idempotent).
+    Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update"""
+    graph_client = make_patch_svc(return_value=make_details())
+    refs = {raw_key: {"alias": "Test"}}
+
+    with graph_ctx(MODULE, graph_client):
+        await update_task_details("task-1", '"etag-v1"', references=refs)
+
+    body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
+    assert expected_key in body.references.additional_data
+
+
+@pytest.mark.parametrize("preview_type", [
+    "automatic", "noPreview", "checklist", "description", "reference",
+], ids=["automatic", "noPreview", "checklist", "description", "reference"])
+async def test_update_task_details_sets_preview_type(preview_type, graph_ctx):
+    """All five documented previewType values must be accepted and forwarded."""
+    from msgraph.generated.models.planner_preview_type import PlannerPreviewType
+
+    graph_client = make_patch_svc(return_value=make_details())
+
+    with graph_ctx(MODULE, graph_client):
+        await update_task_details("task-1", '"etag-v1"', preview_type=preview_type)
+
+    body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
+    assert body.preview_type == PlannerPreviewType(preview_type)
+
+
+async def test_update_task_details_invalid_preview_type_raises(graph_ctx):
+    """An invalid previewType value must raise ValueError, not silently pass through."""
+    graph_client = make_patch_svc(return_value=make_details())
+
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError):
+            await update_task_details("task-1", '"etag-v1"', preview_type="invalid")
+
+
 @pytest.mark.parametrize("status,code,exc_type", [
     (403, "MaximumChecklistItemsOnTask", ValueError),
     (400, "BadRequest", ODataError),

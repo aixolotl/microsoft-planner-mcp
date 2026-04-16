@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from urllib.parse import unquote
 
 from pydantic import Field
 
@@ -14,6 +15,7 @@ from msgraph.generated.models.planner_checklist_items import PlannerChecklistIte
 from msgraph.generated.models.planner_external_references import PlannerExternalReferences
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
+from msgraph.generated.models.planner_preview_type import PlannerPreviewType
 # Two different SDK-generated request builders share the class name
 # "TasksRequestBuilder" but live in different URL namespaces:
 #   - users/.../planner/tasks  (used by list_my_tasks — tasks assigned to me)
@@ -281,6 +283,7 @@ async def update_task_details(
     task_id: Annotated[str, "The ID of the task to update."],
     etag: Annotated[str, "The current @odata.etag of the task details resource (from get_task_details). Retries once automatically if stale (412/409)."],
     description: Annotated[str | None, "New plain-text description for the task."] = None,
+    preview_type: Annotated[str | None, "Preview style shown in Planner UI. One of: automatic, noPreview, checklist, description, reference."] = None,
     checklist_items: Annotated[dict | None, "Dict keyed by checklist item GUID. Pass null for a key to delete that item."] = None,
     references: Annotated[dict | None, "Dict keyed by URL-encoded reference URL (periods to %2E, colons to %3A). Pass null for a key to delete that reference."] = None,
 ) -> dict | PlannerTaskDetails | None:
@@ -288,12 +291,52 @@ async def update_task_details(
     if token is None:
         raise AuthorizationError("No access token available")
 
+    ctx = get_optional_context()
+
+    if ctx is not None:
+        await ctx.info(f"Updating details for task {task_id}")
+
     body = PlannerTaskDetails()
     if description is not None:
         body.description = description
+    if preview_type is not None:
+        # PlannerPreviewType is a str enum — look up by value (case-sensitive).
+        # Without this, callers would need to know the Python enum member name.
+        # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
+        body.preview_type = PlannerPreviewType(preview_type)
     if checklist_items is not None:
+        # Copy to avoid mutating the caller's dict when injecting @odata.type.
+        # Without the copy, callers that reuse the dict would see unexpected
+        # side effects (extra keys added silently).
+        checklist_items = {k: ({**v} if isinstance(v, dict) else v) for k, v in checklist_items.items()}
+        # The Graph Planner API requires @odata.type on every checklist item
+        # in the PATCH body. Without it, Graph returns 400: "The given untyped
+        # value … is invalid. Consider using a OData type annotation explicitly."
+        # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
+        for value in checklist_items.values():
+            if isinstance(value, dict) and "@odata.type" not in value:
+                value["@odata.type"] = "microsoft.graph.plannerChecklistItem"
         body.checklist = PlannerChecklistItems(additional_data=checklist_items)
     if references is not None:
+        # Graph Planner requires reference keys to encode only ":" → %3A and
+        # "." → %2E. Slashes and other URL characters stay literal — the docs
+        # example shows "http%3A//developer%2Emicrosoft%2Ecom", NOT full
+        # percent-encoding.
+        # unquote() first normalises pre-encoded keys (e.g. "https%3A//…")
+        # back to raw form so the subsequent replace is idempotent — callers
+        # can send raw or pre-encoded URLs and get the same result.
+        # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
+        references = {
+            unquote(k).replace(":", "%3A").replace(".", "%2E"): ({**v} if isinstance(v, dict) else v)
+            for k, v in references.items()
+        }
+        # Same requirement for external references — each needs @odata.type.
+        # Without it, Graph returns 400. Null values (used to delete a ref)
+        # are skipped since they carry no properties.
+        # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
+        for value in references.values():
+            if isinstance(value, dict) and "@odata.type" not in value:
+                value["@odata.type"] = "microsoft.graph.plannerExternalReference"
         body.references = PlannerExternalReferences(additional_data=references)
 
     async with graph_client_manager.for_user(token.token) as graph_client:
