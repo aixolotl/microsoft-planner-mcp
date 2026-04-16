@@ -71,7 +71,7 @@ def graph_ctx():
             result = await some_tool(...)
 
         # optionally stack with another patch:
-        with graph_ctx("src.tools.tasks", MagicMock()), patch("src.tools.tasks.PlannerService", return_value=svc):
+        with graph_ctx("src.tools.tasks", MagicMock()), patch("src.tools.tasks.TaskService", return_value=svc):
             ...
     """
     @contextmanager

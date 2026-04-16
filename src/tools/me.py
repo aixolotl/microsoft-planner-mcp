@@ -3,10 +3,10 @@ from __future__ import annotations
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
-from msgraph.generated.models.user import User
 
 from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
+from ..services.base import BasePlannerService
 
 me_router = FastMCP("me")
 
@@ -15,7 +15,7 @@ me_router = FastMCP("me")
 # prompts. Without it, clients treat the tool as potentially destructive.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @me_router.tool(name="get_me", annotations={"readOnlyHint": True})
-async def get_me() -> User | None:
+async def get_me() -> dict | None:
     """Return the authenticated user's profile from Microsoft Graph.
 
     Returns:
@@ -37,4 +37,4 @@ async def get_me() -> User | None:
         await ctx.debug("Fetching authenticated user profile from Microsoft Graph")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        return await graph_client.me.get()
+        return BasePlannerService.serialize_graph_object(await graph_client.me.get())

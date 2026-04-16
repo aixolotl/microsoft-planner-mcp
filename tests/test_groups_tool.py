@@ -11,6 +11,7 @@ from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.group import Group
 from msgraph.generated.users.item.transitive_member_of.graph_group.graph_group_request_builder import GraphGroupRequestBuilder
 
+from src.services.base import BasePlannerService
 from src.tools.groups import list_my_groups
 
 MODULE = "src.tools.groups"
@@ -65,7 +66,7 @@ async def test_returns_group_list(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await list_my_groups()
 
-    assert result == groups
+    assert result == BasePlannerService.serialize_graph_list(groups)
 
 
 @pytest.mark.parametrize("get_return", [None, make_groups_result(None)], ids=["result-none", "value-none"])

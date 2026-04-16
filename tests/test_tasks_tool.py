@@ -12,7 +12,8 @@ from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
 from msgraph.generated.models.planner_task_details import PlannerTaskDetails
 
-from src.services.planner_service import PlannerService
+from src.services.base import BasePlannerService
+from src.services.task_service import TaskService
 from src.tools.tasks import (
     create_task,
     delete_task,
@@ -124,7 +125,7 @@ async def test_list_my_tasks_returns_tasks(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await list_my_tasks()
 
-    assert result == tasks
+    assert result == BasePlannerService.serialize_graph_list(tasks)
 
 
 @pytest.mark.parametrize("get_return", [None, make_tasks_result(None)], ids=["result-none", "value-none"])
@@ -176,7 +177,7 @@ async def test_get_task_details_returns_details(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await get_task_details("task-1")
 
-    assert result is details
+    assert result == BasePlannerService.serialize_graph_object(details)
     graph_client.planner.tasks.by_planner_task_id.assert_called_once_with("task-1")
 
 
@@ -199,7 +200,7 @@ async def test_update_task_returns_updated_task(graph_ctx):
     updated = make_task(title="Updated")
     svc = make_patch_svc(return_value=updated)
 
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
+    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         result = await update_task("task-1", '"etag-v1"', title="Updated")
 
     assert result is updated
@@ -217,7 +218,7 @@ async def test_update_task_returns_updated_task(graph_ctx):
 async def test_update_task_sets_scalar_fields(field, value, attr, graph_ctx):
     svc = make_patch_svc(return_value=make_task())
 
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
+    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         await update_task("task-1", '"etag-v1"', **{field: value})
 
     _, body, _ = svc.patch_task.call_args.args
@@ -232,8 +233,8 @@ async def test_update_task_converts_due_date_to_utc(due_str, expected_utc, graph
     svc = make_patch_svc(return_value=make_task())
 
     with graph_ctx(MODULE, MagicMock()), \
-         patch(f"{MODULE}.PlannerService", return_value=svc) as mock_svc_cls:
-        mock_svc_cls.to_utc = PlannerService.to_utc
+         patch(f"{MODULE}.TaskService", return_value=svc) as mock_svc_cls:
+        mock_svc_cls.to_utc = TaskService.to_utc
         await update_task("task-1", '"etag-v1"', due_date_time=due_str)
 
     _, body, _ = svc.patch_task.call_args.args
@@ -243,7 +244,7 @@ async def test_update_task_converts_due_date_to_utc(due_str, expected_utc, graph
 async def test_update_task_assign_users_builds_correct_additional_data(graph_ctx):
     svc = make_patch_svc(return_value=make_task())
 
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
+    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         await update_task("task-1", '"etag-v1"', assign_user_ids=["user-a"], unassign_user_ids=["user-b"])
 
     _, body, _ = svc.patch_task.call_args.args
@@ -258,7 +259,7 @@ async def test_update_task_no_fields_sends_empty_body(graph_ctx):
     """Calling update_task with only required args sends an empty PlannerTask body."""
     svc = make_patch_svc(return_value=make_task())
 
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
+    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         await update_task("task-1", '"etag-v1"')
 
     _, body, _ = svc.patch_task.call_args.args
@@ -275,7 +276,7 @@ async def test_update_task_details_returns_updated_details(graph_ctx):
     updated = make_details("new desc")
     svc = make_patch_svc(return_value=updated)
 
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
+    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         result = await update_task_details("task-1", '"etag-v1"', description="new desc")
 
     assert result is updated
@@ -290,7 +291,7 @@ async def test_update_task_details_sets_checklist_and_references(graph_ctx):
     checklist = {"guid-1": {"@odata.type": "microsoft.graph.plannerChecklistItem", "title": "Step 1", "isChecked": False}}
     refs = {"https%3A//example%2Ecom": {"@odata.type": "microsoft.graph.plannerExternalReference", "alias": "Ref"}}
 
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
+    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         await update_task_details("task-1", '"etag-v1"', checklist_items=checklist, references=refs)
 
     _, body, _ = svc.patch_task_details.call_args.args
@@ -305,7 +306,7 @@ async def test_update_task_details_sets_checklist_and_references(graph_ctx):
 async def test_update_task_details_odata_error(status, code, exc_type, graph_ctx, make_odata_error):
     svc = make_patch_svc(side_effect=make_odata_error(status, code))
 
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
+    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         with pytest.raises(exc_type) as exc_info:
             await update_task_details("task-1", '"etag-v1"', description="x")
 
@@ -323,7 +324,7 @@ async def test_update_task_details_odata_error(status, code, exc_type, graph_ctx
 async def test_delete_task_delegates_to_service(graph_ctx):
     svc = make_patch_svc()
 
-    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.PlannerService", return_value=svc):
+    with graph_ctx(MODULE, MagicMock()), patch(f"{MODULE}.TaskService", return_value=svc):
         result = await delete_task("task-1", '"etag-v1"')
 
     svc.delete_task.assert_awaited_once_with("task-1", '"etag-v1"')
@@ -345,7 +346,7 @@ async def test_list_tasks_returns_tasks(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await list_tasks("plan-1")
 
-    assert result == tasks
+    assert result == BasePlannerService.serialize_graph_list(tasks)
     graph_client.planner.plans.by_planner_plan_id.assert_called_once_with("plan-1")
 
 
@@ -362,7 +363,7 @@ async def test_list_tasks_returns_none_when_empty(get_return, graph_ctx):
 
 @pytest.mark.parametrize("select_arg,expected", [
     ({"select": "id,title"}, ["id", "title"]),
-    ({}, ["id", "title", "planId", "bucketId", "percentComplete", "dueDateTime", "assignments"]),
+    ({}, ["id", "title", "bucketId", "percentComplete", "dueDateTime", "assignments"]),
     ({"select": "*all"}, None),
     ({"select": None}, None),
 ], ids=["custom-csv", "default", "star-all", "explicit-none"])
@@ -388,7 +389,7 @@ async def test_create_task_returns_created_task(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await create_task("plan-1", "bucket-1", "My Task")
 
-    assert result is created
+    assert result == BasePlannerService.serialize_graph_object(created)
     body = graph_client.planner.tasks.post.call_args.args[0]
     assert body.plan_id == "plan-1"
     assert body.bucket_id == "bucket-1"

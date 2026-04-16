@@ -4,13 +4,11 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
-from msgraph.generated.models.group import Group
-from msgraph.generated.groups.groups_request_builder import GroupsRequestBuilder
 from msgraph.generated.users.item.transitive_member_of.graph_group.graph_group_request_builder import GraphGroupRequestBuilder
 
 from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
-from ..services.planner_service import PlannerService
+from ..services.group_service import GroupService
 
 groups_router = FastMCP("groups")
 
@@ -20,7 +18,7 @@ async def list_my_groups(
     select: str | None = "id,displayName,mail",
     filter: str | None = None,
     expand: str | None = None,
-) -> list[Group] | None:
+) -> list[dict] | None:
     """List all Microsoft 365 groups the authenticated user is a member of.
     
     Args:
@@ -55,6 +53,13 @@ async def list_my_groups(
         if select is not None
         else None
     )
+    # $expand also requires a list[str]. Split the caller-supplied CSV the same
+    # way as $select so callers don't need to know the SDK's internal shape.
+    expand_fields = (
+        [field.strip() for field in expand.split(",") if field.strip()]
+        if expand is not None
+        else None
+    )
     
     async with graph_client_manager.for_user(token.token) as graph_client:
         # /me/memberOf returns all directory objects the user belongs to, not
@@ -63,13 +68,13 @@ async def list_my_groups(
         # response includes roles, admin units, and other non-group objects that
         # cannot be passed to list_group_plans or create_plan.
         # Docs: https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof
-        groups = await PlannerService.paginate(
+        groups = await GroupService(graph_client, serialize=True).paginate(
             graph_client.me.transitive_member_of.graph_group,
             RequestConfiguration(
                 query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
                     select=select_fields,
-                    filter=filter,  # OData filter string, e.g. "startsWith(displayName,'Project')"
-                    expand=expand  # OData expand string, e.g. "members($select=id,displayName)"                    
+                    filter=filter,
+                    expand=expand_fields,
                 )
             ),
         )

@@ -10,6 +10,7 @@ from fastmcp.exceptions import AuthorizationError
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
 
+from src.services.base import BasePlannerService
 from src.tools.plans import create_plan, delete_plan, list_group_plans, list_my_plans
 
 MODULE = "src.tools.plans"
@@ -85,7 +86,7 @@ async def test_returns_plan_list(graph_ctx):
     with graph_ctx(MODULE, make_graph_client(plans)):
         result = await list_my_plans()
 
-    assert result == plans
+    assert result == BasePlannerService.serialize_graph_list(plans)
 
 
 @pytest.mark.parametrize("get_return", [None, make_plans_result(None)], ids=["result-none", "value-none"])
@@ -142,7 +143,7 @@ async def test_list_group_plans_returns_plans(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await list_group_plans("group-1")
 
-    assert result == plans
+    assert result == BasePlannerService.serialize_graph_list(plans)
     graph_client.groups.by_group_id.assert_called_once_with("group-1")
 
 
@@ -210,7 +211,7 @@ async def test_create_plan_returns_plan(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await create_plan("group-1", "Sprint 1")
 
-    assert result is plan
+    assert result == BasePlannerService.serialize_graph_object(plan)
 
 
 async def test_create_plan_posts_correct_body(graph_ctx):
@@ -266,13 +267,13 @@ async def test_create_plan_forwards_obo_token(token_capturing_ctx):
 
 
 async def test_delete_plan_calls_service(graph_ctx):
-    # PlannerService.delete_plan is the correct delegation path; patching it
+    # PlanService.delete_plan is the correct delegation path; patching it
     # here isolates the tool from service internals so changes to retry logic
     # do not break this test.
     graph_client = MagicMock()
 
     with graph_ctx(MODULE, graph_client), \
-         patch(f"{MODULE}.PlannerService") as mock_svc_cls:
+         patch(f"{MODULE}.PlanService") as mock_svc_cls:
         mock_svc = MagicMock()
         mock_svc.delete_plan = AsyncMock()
         mock_svc_cls.return_value = mock_svc
@@ -286,7 +287,7 @@ async def test_delete_plan_forwards_obo_token(token_capturing_ctx):
     graph_client = MagicMock()
 
     with token_capturing_ctx(MODULE, graph_client, "my-obo") as received, \
-         patch(f"{MODULE}.PlannerService") as mock_svc_cls:
+         patch(f"{MODULE}.PlanService") as mock_svc_cls:
         mock_svc = MagicMock()
         mock_svc.delete_plan = AsyncMock()
         mock_svc_cls.return_value = mock_svc

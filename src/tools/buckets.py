@@ -8,7 +8,7 @@ from msgraph.generated.models.planner_bucket import PlannerBucket
 
 from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
-from ..services.planner_service import PlannerService
+from ..services.bucket_service import BucketService
 
 buckets_router = FastMCP("buckets")
 
@@ -17,7 +17,7 @@ buckets_router = FastMCP("buckets")
 # state, allowing it to skip user confirmation prompts for read operations.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @buckets_router.tool(name="list_buckets", annotations={"readOnlyHint": True})
-async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
+async def list_buckets(plan_id: str) -> list[dict] | None:
     """List all buckets in a Planner plan.
 
     Args:
@@ -36,13 +36,13 @@ async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
         await ctx.info(f"Fetching buckets for plan {plan_id}")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        # PlannerService.paginate is used instead of a bare .get() because
-        # the Graph API returns paged responses (up to 100 items per page with
-        # an @odata.nextLink for subsequent pages). A direct .get() silently
+        # paginate() is used instead of a bare .get() because the Graph API
+        # returns paged responses (up to 100 items per page with an
+        # @odata.nextLink for subsequent pages). A direct .get() silently
         # drops everything past the first page. paginate() follows all pages
         # via PageIterator and returns a flat list.
         # Docs: https://learn.microsoft.com/en-us/graph/paging
-        buckets = await PlannerService.paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
+        buckets = await BucketService(graph_client, serialize=True).paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
 
     if ctx is not None:
         await ctx.info(f"Found {len(buckets)} bucket(s) in plan {plan_id}")
@@ -51,7 +51,7 @@ async def list_buckets(plan_id: str) -> list[PlannerBucket] | None:
 
 
 @buckets_router.tool(name="create_bucket")
-async def create_bucket(plan_id: str, name: str) -> PlannerBucket | None:
+async def create_bucket(plan_id: str, name: str) -> dict | None:
     """Create a new bucket in a Planner plan.
 
     Args:
@@ -80,7 +80,7 @@ async def create_bucket(plan_id: str, name: str) -> PlannerBucket | None:
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
-            return await graph_client.planner.buckets.post(body)
+            bucket = await graph_client.planner.buckets.post(body)
         except ODataError as exc:
             # 403 means the user lacks write access to the plan. Convert to a
             # clear ValueError so the LLM receives a readable explanation.
@@ -89,6 +89,7 @@ async def create_bucket(plan_id: str, name: str) -> PlannerBucket | None:
             code = exc.error.code if exc.error else None
             msg = exc.error.message if exc.error else exc.primary_message
             raise ValueError(f"Cannot create bucket ({code}): {msg}") from exc
+    return BucketService.serialize_graph_object(bucket)
 
 
 @buckets_router.tool(name="delete_bucket")
@@ -104,5 +105,5 @@ async def delete_bucket(bucket_id: str, etag: str) -> None:
         raise AuthorizationError("No access token available")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        svc = PlannerService(graph_client)
+        svc = BucketService(graph_client)
         await svc.delete_bucket(bucket_id, etag)

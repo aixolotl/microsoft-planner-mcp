@@ -25,7 +25,7 @@ from msgraph.generated.planner.plans.item.tasks.tasks_request_builder import Tas
 
 from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
-from ..services.planner_service import PlannerService
+from ..services.task_service import TaskService
 
 tasks_router = FastMCP("tasks")
 
@@ -36,7 +36,7 @@ tasks_router = FastMCP("tasks")
 @tasks_router.tool(name="list_my_tasks", annotations={"readOnlyHint": True})
 async def list_my_tasks(
     select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
-) -> list[PlannerTask] | None:
+) -> list[dict] | None:
     """List all Planner tasks assigned to the authenticated user across all plans.
 
     Args:
@@ -69,7 +69,7 @@ async def list_my_tasks(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        tasks = await PlannerService.paginate(
+        tasks = await TaskService(graph_client, serialize=True).paginate(
             graph_client.me.planner.tasks,
             RequestConfiguration(
                 query_parameters=TasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
@@ -89,13 +89,13 @@ async def list_my_tasks(
 @tasks_router.tool(name="list_tasks", annotations={"readOnlyHint": True})
 async def list_tasks(
     plan_id: str,
-    select: str | None = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
-) -> list[PlannerTask] | None:
+    select: str | None = "id,title,bucketId,percentComplete,dueDateTime,assignments",
+) -> list[dict] | None:
     """List all tasks in a Planner plan.
 
     Args:
         plan_id: The ID of the plan to list tasks for (from list_my_plans or list_group_plans).
-        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,planId,bucketId,percentComplete,dueDateTime,assignments". Pass "*all" for all fields.
+        select: Comma-separated list of PlannerTask fields to include. Default is "id,title,bucketId,percentComplete,dueDateTime,assignments". Pass "*all" for all fields.
 
     Returns:
         A list of PlannerTask objects in the plan, or None if the plan has no tasks.
@@ -119,7 +119,7 @@ async def list_tasks(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        tasks = await PlannerService.paginate(
+        tasks = await TaskService(graph_client, serialize=True).paginate(
             graph_client.planner.plans.by_planner_plan_id(plan_id).tasks,
             RequestConfiguration(
                 query_parameters=PlanTasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
@@ -143,7 +143,7 @@ async def create_task(
     due_date_time: str | None = None,
     percent_complete: Annotated[int, Field(ge=0, le=100)] | None = None,
     assign_user_ids: list[str] | None = None,
-) -> PlannerTask | None:
+) -> dict | None:
     """Create a new task in a Planner plan.
 
     Args:
@@ -156,14 +156,14 @@ async def create_task(
         assign_user_ids: Optional list of user object IDs to assign to the task.
 
     Returns:
-        The created PlannerTask object.
+        The created task as a dict with non-null fields.
     """
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
 
-    start_dt = PlannerService.to_utc(start_date_time) if start_date_time else None
-    due_dt = PlannerService.to_utc(due_date_time) if due_date_time else None
+    start_dt = TaskService.to_utc(start_date_time) if start_date_time else None
+    due_dt = TaskService.to_utc(due_date_time) if due_date_time else None
     if start_dt and due_dt and start_dt > due_dt:
         raise ValueError(f"start_date_time ({start_date_time}) must not be after due_date_time ({due_date_time})")
 
@@ -195,7 +195,7 @@ async def create_task(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
-            return await graph_client.planner.tasks.post(body)
+            task = await graph_client.planner.tasks.post(body)
         except ODataError as exc:
             # 403 from task creation usually means the user has hit the plan
             # task limit or lacks write permission. Convert to ValueError with a
@@ -206,19 +206,20 @@ async def create_task(
             code = exc.error.code if exc.error else None
             msg = exc.error.message if exc.error else exc.primary_message
             raise ValueError(f"Cannot create task ({code}): {msg}") from exc
+    return TaskService.serialize_graph_object(task)
 
 
 # readOnlyHint=True: this tool reads task details without any side effects.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @tasks_router.tool(name="get_task_details", annotations={"readOnlyHint": True})
-async def get_task_details(task_id: str) -> PlannerTaskDetails | None:
+async def get_task_details(task_id: str) -> dict | None:
     """Get the full details for a Planner task: description, checklist items, and external references.
 
     Args:
         task_id: The ID of the task to retrieve details for (from list_my_tasks or list_tasks).
 
     Returns:
-        A PlannerTaskDetails object with description, checklist, and references.
+        The task details as a dict with non-null fields.
     """
     token = get_access_token()
     if token is None:
@@ -231,8 +232,8 @@ async def get_task_details(task_id: str) -> PlannerTaskDetails | None:
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         result = await graph_client.planner.tasks.by_planner_task_id(task_id).details.get()
-    
-    return result if result else None
+
+    return TaskService.serialize_graph_object(result)
 
 
 @tasks_router.tool(name="update_task")
@@ -246,7 +247,7 @@ async def update_task(
     assignee_priority: str | None = None,
     assign_user_ids: list[str] | None = None,
     unassign_user_ids: list[str] | None = None,
-) -> PlannerTask | None:
+) -> dict | None:
     """Update a Planner task's basic fields. All fields are optional — only provided fields are changed.
 
     Args:
@@ -261,7 +262,7 @@ async def update_task(
         unassign_user_ids: List of user object IDs to remove from the task.
 
     Returns:
-        The updated PlannerTask object.
+        The updated task as a dict with non-null fields.
     """
     token = get_access_token()
     if token is None:
@@ -273,7 +274,7 @@ async def update_task(
         ("percent_complete", percent_complete),
         ("bucket_id", bucket_id),
         ("assignee_priority", assignee_priority),
-        ("due_date_time", PlannerService.to_utc(due_date_time) if due_date_time is not None else None),
+        ("due_date_time", TaskService.to_utc(due_date_time) if due_date_time is not None else None),
     ]:
         if value is not None:
             setattr(body, attr, value)
@@ -285,8 +286,9 @@ async def update_task(
         body.assignments = PlannerAssignments(additional_data=assignment_data)
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        svc = PlannerService(graph_client)
-        return await svc.patch_task(task_id, body, etag)
+        svc = TaskService(graph_client, serialize=True)
+        task = await svc.patch_task(task_id, body, etag)
+    return task  # type: ignore[return-value]
 
 
 @tasks_router.tool(name="update_task_details")
@@ -296,7 +298,7 @@ async def update_task_details(
     description: str | None = None,
     checklist_items: dict | None = None,
     references: dict | None = None,
-) -> PlannerTaskDetails | None:
+) -> dict | None:
     """Update the details of a Planner task: description, checklist items, and external references.
 
     Args:
@@ -309,7 +311,7 @@ async def update_task_details(
             Example: { "https%3A//example%2Ecom": { "@odata.type": "microsoft.graph.plannerExternalReference", "alias": "...", "previewPriority": " !", "type": "Other" } }
 
     Returns:
-        The updated PlannerTaskDetails object.
+        The updated task details as a dict with non-null fields.
     """
     token = get_access_token()
     if token is None:
@@ -324,15 +326,16 @@ async def update_task_details(
         body.references = PlannerExternalReferences(additional_data=references)
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        svc = PlannerService(graph_client)
+        svc = TaskService(graph_client, serialize=True)
         try:
-            return await svc.patch_task_details(task_id, body, etag)
+            details = await svc.patch_task_details(task_id, body, etag)
         except ODataError as exc:
             if exc.response_status_code == 403:
                 code = exc.error.code if exc.error else None
                 msg = exc.error.message if exc.error else exc.primary_message
                 raise ValueError(f"Cannot update task details ({code}): {msg}") from exc
             raise
+    return details  # type: ignore[return-value]
 
 
 @tasks_router.tool(name="delete_task")
@@ -348,5 +351,5 @@ async def delete_task(task_id: str, etag: str) -> None:
         raise AuthorizationError("No access token available")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        svc = PlannerService(graph_client)
+        svc = TaskService(graph_client)
         await svc.delete_task(task_id, etag)

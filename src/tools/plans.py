@@ -10,7 +10,7 @@ from msgraph.generated.users.item.planner.plans.plans_request_builder import Pla
 
 from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
-from ..services.planner_service import PlannerService
+from ..services.plan_service import PlanService
 
 plans_router = FastMCP("plans")
 
@@ -21,7 +21,7 @@ plans_router = FastMCP("plans")
 @plans_router.tool(name="list_my_plans", annotations={"readOnlyHint": True})
 async def list_my_plans(
     select: str | None = "id,title,owner,createdBy,createdDateTime",
-) -> list[PlannerPlan] | None:
+) -> list[dict] | None:
     """List Planner plans directly associated with the authenticated user.
 
     Note: this endpoint only returns plans the user personally owns or has a direct
@@ -59,7 +59,7 @@ async def list_my_plans(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        all_plans = await PlannerService.paginate(
+        all_plans = await PlanService(graph_client, serialize=True).paginate(
             graph_client.me.planner.plans,
             RequestConfiguration(
                 query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
@@ -78,7 +78,7 @@ async def list_my_plans(
 async def list_group_plans(
     group_id: str,
     select: str | None = "id,title,owner,createdBy,createdDateTime"
-    ) -> list[PlannerPlan] | None:
+    ) -> list[dict] | None:
     """List all Planner plans belonging to a Microsoft 365 group.
 
     Args:
@@ -114,7 +114,7 @@ async def list_group_plans(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
-            plans = await PlannerService.paginate(
+            plans = await PlanService(graph_client, serialize=True).paginate(
                 graph_client.groups.by_group_id(group_id).planner.plans,
                 RequestConfiguration(
                     query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
@@ -142,7 +142,7 @@ async def list_group_plans(
 
 
 @plans_router.tool(name="create_plan")
-async def create_plan(group_id: str, title: str) -> PlannerPlan | None:
+async def create_plan(group_id: str, title: str) -> dict | None:
     """Create a new Planner plan for a Microsoft 365 group.
 
     Args:
@@ -167,7 +167,7 @@ async def create_plan(group_id: str, title: str) -> PlannerPlan | None:
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
-            return await graph_client.planner.plans.post(body)
+            plan = await graph_client.planner.plans.post(body)
         except ODataError as exc:
             # 403 here typically means the user is not a member of the group or
             # the group does not have a licence for Planner. Convert to a clear
@@ -178,6 +178,7 @@ async def create_plan(group_id: str, title: str) -> PlannerPlan | None:
             code = exc.error.code if exc.error else None
             msg = exc.error.message if exc.error else exc.primary_message
             raise ValueError(f"Cannot create plan ({code}): {msg}") from exc
+    return PlanService.serialize_graph_object(plan)
 
 
 @plans_router.tool(name="delete_plan")
@@ -193,5 +194,5 @@ async def delete_plan(plan_id: str, etag: str) -> None:
         raise AuthorizationError("No access token available")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        svc = PlannerService(graph_client)
+        svc = PlanService(graph_client)
         await svc.delete_plan(plan_id, etag)

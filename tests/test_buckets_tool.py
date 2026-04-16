@@ -10,6 +10,7 @@ from fastmcp.exceptions import AuthorizationError
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_bucket import PlannerBucket
 
+from src.services.base import BasePlannerService
 from src.tools.buckets import create_bucket, delete_bucket, list_buckets
 
 MODULE = "src.tools.buckets"
@@ -64,7 +65,7 @@ async def test_list_buckets_returns_buckets(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await list_buckets("plan-1")
 
-    assert result == buckets
+    assert result == BasePlannerService.serialize_graph_list(buckets)
     graph_client.planner.plans.by_planner_plan_id.assert_called_once_with("plan-1")
 
 
@@ -116,7 +117,7 @@ async def test_create_bucket_returns_bucket(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await create_bucket("plan-1", "In Progress")
 
-    assert result is bucket
+    assert result == BasePlannerService.serialize_graph_object(bucket)
 
 
 async def test_create_bucket_posts_correct_body(graph_ctx):
@@ -175,13 +176,13 @@ async def test_create_bucket_forwards_obo_token(token_capturing_ctx):
 
 
 async def test_delete_bucket_calls_service(graph_ctx):
-    # PlannerService.delete_bucket is the correct delegation path; patching it
+    # BucketService.delete_bucket is the correct delegation path; patching it
     # here isolates the tool from service internals so retry logic changes
     # do not break this test.
     graph_client = MagicMock()
 
     with graph_ctx(MODULE, graph_client), \
-         patch(f"{MODULE}.PlannerService") as mock_svc_cls:
+         patch(f"{MODULE}.BucketService") as mock_svc_cls:
         mock_svc = MagicMock()
         mock_svc.delete_bucket = AsyncMock()
         mock_svc_cls.return_value = mock_svc
@@ -195,7 +196,7 @@ async def test_delete_bucket_forwards_obo_token(token_capturing_ctx):
     graph_client = MagicMock()
 
     with token_capturing_ctx(MODULE, graph_client, "my-obo") as received, \
-         patch(f"{MODULE}.PlannerService") as mock_svc_cls:
+         patch(f"{MODULE}.BucketService") as mock_svc_cls:
         mock_svc = MagicMock()
         mock_svc.delete_bucket = AsyncMock()
         mock_svc_cls.return_value = mock_svc
