@@ -155,8 +155,6 @@ async def delete_bucket(
         bucket_id: The ID of the bucket to delete (from list_buckets).
         etag: The current @odata.etag of the bucket. BucketService retries once
             with a refreshed ETag on 412 Precondition Failed or 409 Conflict.
-            A 409 from a non-empty bucket is caught by the pre-flight check
-            before the service is called — empty the bucket first.
 
     Returns:
         A dict confirming deletion: {"deleted": true, "id": "<bucket_id>"}.

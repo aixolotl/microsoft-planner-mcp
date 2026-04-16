@@ -18,7 +18,8 @@ async def get_me() -> dict | None:
     """Return the authenticated user's profile from Microsoft Graph.
 
     Returns:
-        The authenticated user's identity as a User object.
+        The authenticated user's profile as a serialized dict (Graph default
+        projection — includes id, displayName, mail, userPrincipalName, etc.).
     """
     # get_access_token() returns the FastMCP session token injected by
     # AzureProvider after the OAuth flow completes. It is None when the request
