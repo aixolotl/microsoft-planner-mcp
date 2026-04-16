@@ -8,6 +8,8 @@ from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
+from msgraph.generated.models.planner_plan_details import PlannerPlanDetails
+from msgraph.generated.models.planner_user_ids import PlannerUserIds
 from msgraph.generated.users.item.planner.plans.plans_request_builder import PlansRequestBuilder
 
 from ..deps import get_optional_context
@@ -22,7 +24,11 @@ plans_router = FastMCP("plans")
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @plans_router.tool(
     name="list_my_plans",
-    description="List Planner plans directly associated with the authenticated user.",
+    description=(
+        "List Planner plans explicitly shared with the authenticated user "
+        "(via plannerPlanDetails.sharedWith). This does NOT return all plans "
+        "in groups the user belongs to — use list_group_plans for that."
+    ),
     tags={"plans", "read"},
     annotations={"readOnlyHint": True},
 )
@@ -160,7 +166,6 @@ async def create_plan(
         svc = PlannerService(graph_client)
         try:
             result = await graph_client.planner.plans.post(body)
-            return svc.serialize_graph_object(result) if result else None
         except ODataError as exc:
             # 403 here typically means the user is not a member of the group or
             # the group does not have a licence for Planner. Convert to a clear
@@ -171,6 +176,41 @@ async def create_plan(
             code = exc.error.code if exc.error else None
             msg = exc.error.message if exc.error else exc.primary_message
             raise ValueError(f"Cannot create plan ({code}): {msg}") from exc
+
+        if result is None:
+            return None
+
+        # Auto-share the plan with its creator so it appears in
+        # /me/planner/plans (list_my_plans). Without this, the plan is only
+        # discoverable via list_group_plans because Graph does not
+        # automatically add the creator to plannerPlanDetails.sharedWith.
+        # Docs: https://learn.microsoft.com/en-us/graph/api/plannerplandetails-update
+        plan_item = graph_client.planner.plans.by_planner_plan_id(result.id)
+        try:
+            me = await graph_client.me.get()
+            if me and me.id:
+                details = await plan_item.details.get()
+                details_etag = (
+                    details.additional_data.get("@odata.etag") if details else None
+                )
+                if details_etag:
+                    shared = PlannerUserIds()
+                    shared.additional_data = {me.id: True}
+                    patch_body = PlannerPlanDetails()
+                    patch_body.shared_with = shared
+                    await plan_item.details.patch(
+                        patch_body,
+                        request_configuration=svc.make_config(details_etag),
+                    )
+                    if ctx is not None:
+                        await ctx.debug(f"Auto-shared plan with creator {me.id}")
+        except Exception:
+            # Best-effort: if sharing fails the plan was still created
+            # successfully. The user can still access it via list_group_plans.
+            if ctx is not None:
+                await ctx.debug("Could not auto-share plan with creator")
+
+        return svc.serialize_graph_object(result)
 
 
 @plans_router.tool(
