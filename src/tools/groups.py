@@ -25,8 +25,7 @@ groups_router = FastMCP("groups")
 async def list_my_groups(
     select: Annotated[str | None, "Comma-separated list of Group fields to include. Pass '*all' for all fields."] = "id,displayName,mail",
     filter: Annotated[str | None, "OData filter string, e.g. \"startsWith(displayName,'Project')\"."] = None,
-    expand: Annotated[str | None, "Comma-separated related entities to expand, e.g. \"members($select=id,displayName)\"."] = None,
-) -> list[Group] | None:
+) -> list[dict] | list[Group] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -52,6 +51,7 @@ async def list_my_groups(
     )
     
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         # /me/memberOf returns all directory objects the user belongs to, not
         # just groups. We use /me/transitiveMemberOf/microsoft.graph.group to
         # filter to M365 groups only via OData cast. Without the cast, the
@@ -63,8 +63,7 @@ async def list_my_groups(
             RequestConfiguration(
                 query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
                     select=select_fields,
-                    filter=filter,  # OData filter string, e.g. "startsWith(displayName,'Project')"
-                    expand=expand  # OData expand string, e.g. "members($select=id,displayName)"                    
+                    filter=filter,
                 )
             ),
         )
@@ -72,4 +71,4 @@ async def list_my_groups(
     if ctx is not None:
         await ctx.debug(f"Found {len(groups)} group(s)")
 
-    return groups or None
+    return svc.serialize_graph_list(groups) if groups else None

@@ -41,7 +41,7 @@ tasks_router = FastMCP("tasks")
 )
 async def list_my_tasks(
     select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
-) -> list[PlannerTask] | None:
+) -> list[dict] | list[PlannerTask] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -66,6 +66,7 @@ async def list_my_tasks(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         tasks = await PlannerService.paginate(
             graph_client.me.planner.tasks,
             RequestConfiguration(
@@ -78,7 +79,7 @@ async def list_my_tasks(
     if ctx is not None:
         await ctx.info(f"Found {len(tasks)} task(s) assigned to you")
 
-    return tasks or None
+    return svc.serialize_graph_list(tasks) if tasks else None
 
 
 # readOnlyHint=True: this tool only reads from Graph, never writes.
@@ -92,7 +93,7 @@ async def list_my_tasks(
 async def list_tasks(
     plan_id: Annotated[str, "The ID of the plan to list tasks for (from list_my_plans or list_group_plans)."],
     select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
-) -> list[PlannerTask] | None:
+) -> list[dict] | list[PlannerTask] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -112,6 +113,7 @@ async def list_tasks(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         tasks = await PlannerService.paginate(
             graph_client.planner.plans.by_planner_plan_id(plan_id).tasks,
             RequestConfiguration(
@@ -124,7 +126,7 @@ async def list_tasks(
     if ctx is not None:
         await ctx.info(f"Found {len(tasks)} task(s) in plan {plan_id}")
 
-    return tasks or None
+    return svc.serialize_graph_list(tasks) if tasks else None
 
 
 @tasks_router.tool(
@@ -140,7 +142,7 @@ async def create_task(
     due_date_time: Annotated[str | None, "ISO 8601 due date (e.g. '2026-05-31T00:00:00')."] = None,
     percent_complete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
     assign_user_ids: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
-) -> PlannerTask | None:
+) -> dict | PlannerTask | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -177,8 +179,10 @@ async def create_task(
         )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         try:
-            return await graph_client.planner.tasks.post(body)
+            result = await graph_client.planner.tasks.post(body)
+            return svc.serialize_graph_object(result) if result else None
         except ODataError as exc:
             # 403 from task creation usually means the user has hit the plan
             # task limit or lacks write permission. Convert to ValueError with a
@@ -201,7 +205,7 @@ async def create_task(
 )
 async def get_task_details(
     task_id: Annotated[str, "The ID of the task to retrieve details for (from list_my_tasks or list_tasks)."],
-) -> PlannerTaskDetails | None:
+) -> dict | PlannerTaskDetails | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -212,9 +216,10 @@ async def get_task_details(
         await ctx.debug(f"Fetching details for task {task_id}")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         result = await graph_client.planner.tasks.by_planner_task_id(task_id).details.get()
     
-    return result if result else None
+    return svc.serialize_graph_object(result) if result else None
 
 
 @tasks_router.tool(
@@ -233,7 +238,7 @@ async def update_task(
     assignee_priority: Annotated[str | None, "Order hint string for sorting within the assignee's task list."] = None,
     assign_user_ids: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
     unassign_user_ids: Annotated[list[str] | None, "List of user object IDs to remove from the task."] = None,
-) -> PlannerTask | None:
+) -> dict | PlannerTask | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -257,7 +262,8 @@ async def update_task(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        return await svc.patch_task(task_id, body, etag)
+        result = await svc.patch_task(task_id, body, etag)
+        return svc.serialize_graph_object(result) if result else None
 
 
 @tasks_router.tool(
@@ -272,7 +278,7 @@ async def update_task_details(
     description: Annotated[str | None, "New plain-text description for the task."] = None,
     checklist_items: Annotated[dict | None, "Dict keyed by checklist item GUID. Pass null for a key to delete that item."] = None,
     references: Annotated[dict | None, "Dict keyed by URL-encoded reference URL (periods to %2E, colons to %3A). Pass null for a key to delete that reference."] = None,
-) -> PlannerTaskDetails | None:
+) -> dict | PlannerTaskDetails | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -288,7 +294,8 @@ async def update_task_details(
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
         try:
-            return await svc.patch_task_details(task_id, body, etag)
+            result = await svc.patch_task_details(task_id, body, etag)
+            return svc.serialize_graph_object(result) if result else None
         except ODataError as exc:
             if exc.response_status_code == 403:
                 code = exc.error.code if exc.error else None

@@ -7,6 +7,7 @@ from msgraph.generated.models.user import User
 
 from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
+from ..services.planner_service import PlannerService
 
 me_router = FastMCP("me")
 
@@ -20,7 +21,7 @@ me_router = FastMCP("me")
     tags={"users", "read"},
     annotations={"readOnlyHint": True},
 )
-async def get_me() -> User | None:
+async def get_me() -> dict | User | None:
     # get_access_token() returns the FastMCP session token injected by
     # AzureProvider after the OAuth flow completes. It is None when the request
     # arrives without a valid session (e.g. a bare HTTP call without the
@@ -37,4 +38,7 @@ async def get_me() -> User | None:
         await ctx.debug("Fetching authenticated user profile from Microsoft Graph")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
-        return await graph_client.me.get()
+        svc = PlannerService(graph_client)
+        result = await graph_client.me.get()
+
+    return svc.serialize_graph_object(result) if result else None

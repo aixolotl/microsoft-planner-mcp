@@ -14,12 +14,14 @@ is raised from _refresh_task_etag.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from kiota_abstractions.headers_collection import HeadersCollection
+from kiota_serialization_json.json_serialization_writer import JsonSerializationWriter
 from msgraph import GraphServiceClient
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
@@ -34,8 +36,46 @@ T = TypeVar("T")
 class PlannerService:
     """Planner operations over a caller-supplied GraphServiceClient."""
 
-    def __init__(self, client: GraphServiceClient) -> None:
+    def __init__(self, client: GraphServiceClient, *, serialize: bool = True) -> None:
         self._client = client
+        # When True, return values from tools are converted from Kiota Parsable
+        # objects to plain dicts via JSON round-trip. Without serialization,
+        # FastMCP's default serializer produces incomplete or opaque output
+        # because it does not understand Kiota models.
+        self.serialize = serialize
+
+    # ------------------------------------------------------------------
+    # Serialization helpers
+    # ------------------------------------------------------------------
+
+    def serialize_graph_object(self, obj: Any) -> Any:
+        """Convert a Kiota Parsable object to a plain dict via JSON round-trip.
+
+        Kiota model objects (PlannerTask, Group, User, etc.) implement
+        Parsable.serialize() which writes fields into a SerializationWriter.
+        Using JsonSerializationWriter produces a UTF-8 JSON byte string that
+        we decode and parse into a native dict. Without this, returning a raw
+        Kiota object from an MCP tool can produce incomplete or opaque output
+        because FastMCP's default serializer does not understand Kiota models.
+
+        When self.serialize is False the original object is returned unchanged —
+        useful for internal callers that need the typed SDK object.
+        """
+        if not self.serialize:
+            return obj
+        writer = JsonSerializationWriter()
+        obj.serialize(writer)
+        return json.loads(writer.get_serialized_content().decode("utf-8"))
+
+    def serialize_graph_list(self, items: list[Any]) -> list[Any]:
+        """Convert a list of Kiota Parsable objects to a list of plain dicts.
+
+        Each item is serialized independently via serialize_graph_object. When
+        self.serialize is False the original list is returned unchanged.
+        """
+        if not self.serialize:
+            return items
+        return [self.serialize_graph_object(item) for item in items]
 
     # ------------------------------------------------------------------
     # Internal helpers

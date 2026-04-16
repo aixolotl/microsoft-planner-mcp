@@ -11,6 +11,8 @@ import pytest
 from msgraph.generated.models.o_data_errors.main_error import MainError
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 
+from src.services.planner_service import PlannerService
+
 
 def pytest_configure(config: pytest.Config) -> None:
     """Set required env vars before any src module is imported.
@@ -29,6 +31,25 @@ def pytest_configure(config: pytest.Config) -> None:
     os.environ.setdefault("CLIENT_ID", "test-client-id")
     os.environ.setdefault("CLIENT_SECRET", "test-client-secret")
     os.environ.setdefault("TENANT_ID", "test-tenant-id")
+
+
+@pytest.fixture(autouse=True)
+def _disable_serialize(monkeypatch):
+    """Default PlannerService.serialize to False in all tests.
+
+    WHY THIS EXISTS:
+    Tools now always serialise Graph SDK objects to dicts via PlannerService.
+    Tool-level tests are concerned with auth, delegation, and error handling —
+    not with Kiota JSON serialisation. Defaulting serialize=False keeps tool
+    tests decoupled from the serialisation format. Tests that specifically need
+    to verify serialisation behaviour can override with serialize=True.
+    """
+    _orig_init = PlannerService.__init__
+
+    def _patched_init(self, client, *, serialize=False):
+        _orig_init(self, client, serialize=serialize)
+
+    monkeypatch.setattr(PlannerService, "__init__", _patched_init)
 
 
 @pytest.fixture

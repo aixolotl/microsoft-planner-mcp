@@ -28,7 +28,7 @@ plans_router = FastMCP("plans")
 )
 async def list_my_plans(
     select: Annotated[str | None, "Comma-separated list of PlannerPlan fields to include. Pass '*all' for all fields."] = "id,title,owner,createdBy,createdDateTime",
-) -> list[PlannerPlan] | None:
+) -> list[dict] | list[PlannerPlan] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -54,6 +54,7 @@ async def list_my_plans(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         all_plans = await PlannerService.paginate(
             graph_client.me.planner.plans,
             RequestConfiguration(
@@ -66,7 +67,7 @@ async def list_my_plans(
     if ctx is not None:
         await ctx.info(f"Found {len(all_plans)} plan(s)")
 
-    return all_plans or None
+    return svc.serialize_graph_list(all_plans) if all_plans else None
 
 
 @plans_router.tool(
@@ -78,7 +79,7 @@ async def list_my_plans(
 async def list_group_plans(
     group_id: Annotated[str, "The object ID of the group (from list_my_groups)."],
     select: Annotated[str | None, "Comma-separated list of PlannerPlan fields to include. Pass '*all' for all fields."] = "id,title,owner,createdBy,createdDateTime",
-) -> list[PlannerPlan] | None:
+) -> list[dict] | list[PlannerPlan] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -104,6 +105,7 @@ async def list_group_plans(
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         try:
             plans = await PlannerService.paginate(
                 graph_client.groups.by_group_id(group_id).planner.plans,
@@ -129,7 +131,7 @@ async def list_group_plans(
     if ctx is not None:
         await ctx.info(f"Found {len(plans)} plan(s) in group {group_id}")
 
-    return plans or None
+    return svc.serialize_graph_list(plans) if plans else None
 
 
 @plans_router.tool(
@@ -140,7 +142,7 @@ async def list_group_plans(
 async def create_plan(
     group_id: Annotated[str, "The object ID of the M365 group that will own the plan (from list_my_groups)."],
     title: Annotated[str, "The display title for the new plan."],
-) -> PlannerPlan | None:
+) -> dict | PlannerPlan | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -155,8 +157,10 @@ async def create_plan(
     body.title = title
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         try:
-            return await graph_client.planner.plans.post(body)
+            result = await graph_client.planner.plans.post(body)
+            return svc.serialize_graph_object(result) if result else None
         except ODataError as exc:
             # 403 here typically means the user is not a member of the group or
             # the group does not have a licence for Planner. Convert to a clear

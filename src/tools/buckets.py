@@ -26,7 +26,7 @@ buckets_router = FastMCP("buckets")
 )
 async def list_buckets(
     plan_id: Annotated[str, "The ID of the plan to list buckets for (from list_my_plans or list_group_plans)."],
-) -> list[PlannerBucket] | None:
+) -> list[dict] | list[PlannerBucket] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -37,6 +37,7 @@ async def list_buckets(
         await ctx.info(f"Fetching buckets for plan {plan_id}")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         # PlannerService.paginate is used instead of a bare .get() because
         # the Graph API returns paged responses (up to 100 items per page with
         # an @odata.nextLink for subsequent pages). A direct .get() silently
@@ -48,7 +49,7 @@ async def list_buckets(
     if ctx is not None:
         await ctx.info(f"Found {len(buckets)} bucket(s) in plan {plan_id}")
 
-    return buckets or None
+    return svc.serialize_graph_list(buckets) if buckets else None
 
 
 @buckets_router.tool(
@@ -59,7 +60,7 @@ async def list_buckets(
 async def create_bucket(
     plan_id: Annotated[str, "The ID of the plan to create the bucket in (from list_my_plans or list_group_plans)."],
     name: Annotated[str, "The display name for the new bucket."],
-) -> PlannerBucket | None:
+) -> dict | PlannerBucket | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -78,8 +79,10 @@ async def create_bucket(
     body.order_hint = " !"
 
     async with graph_client_manager.for_user(token.token) as graph_client:
+        svc = PlannerService(graph_client)
         try:
-            return await graph_client.planner.buckets.post(body)
+            result = await graph_client.planner.buckets.post(body)
+            return svc.serialize_graph_object(result) if result else None
         except ODataError as exc:
             # 403 means the user lacks write access to the plan. Convert to a
             # clear ValueError so the LLM receives a readable explanation.

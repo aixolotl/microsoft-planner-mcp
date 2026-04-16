@@ -62,6 +62,10 @@ def make_patch_svc(return_value=None, side_effect=None) -> MagicMock:
     svc.patch_task = AsyncMock(return_value=return_value, side_effect=side_effect)
     svc.patch_task_details = AsyncMock(return_value=return_value, side_effect=side_effect)
     svc.delete_task = AsyncMock(return_value=None)
+    # Pass-through so tool-level serialization calls return the raw object.
+    # Without this, MagicMock auto-creates a child mock for serialize_graph_object
+    # and the assertion ``result is updated`` fails.
+    svc.serialize_graph_object = lambda obj: obj
     return svc
 
 
