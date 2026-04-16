@@ -12,7 +12,10 @@ to any OTLP-compatible backend (Jaeger, Datadog, Grafana Tempo, New Relic…).
 FastMCP automatically produces spans for every tool call, resource read, and
 prompt render — including auth attributes (enduser.id, enduser.scope) and
 mcp.session.id. No manual span creation is required for basic observability.
-Docs: https://gofastmcp.com/servers/telemetry
+Docs: https://gofastmcp.com/servers/telemetry#how-it-works
+Span names/attributes: https://gofastmcp.com/servers/telemetry#server-spans
+Auth attributes: https://gofastmcp.com/servers/telemetry#auth-attributes
+MCP attributes (mcp.session.id): https://gofastmcp.com/servers/telemetry#mcp-semantic-conventions
 
 IMPORTANT: configure() must be called before any FastMCP symbols are used
 (i.e. before `from fastmcp import FastMCP` in server.py). FastMCP resolves
@@ -36,7 +39,7 @@ def configure() -> None:
     Without this function being called first, FastMCP's built-in
     instrumentation runs in no-op mode and no traces are exported, making it
     impossible to observe distributed latency or error rates in production.
-    Docs: https://gofastmcp.com/servers/telemetry#enabling-telemetry
+    Docs: https://gofastmcp.com/servers/telemetry#programmatic-configuration
     """
     endpoint = os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT")
     if not endpoint:

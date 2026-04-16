@@ -6,6 +6,7 @@ from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.group import Group
 from msgraph.generated.groups.groups_request_builder import GroupsRequestBuilder
+from msgraph.generated.users.item.transitive_member_of.graph_group.graph_group_request_builder import GraphGroupRequestBuilder
 
 from ..deps import get_optional_context
 from ..graph_client_manager import graph_client_manager
@@ -16,16 +17,18 @@ groups_router = FastMCP("groups")
 
 @groups_router.tool(name="list_my_groups", annotations={"readOnlyHint": True})
 async def list_my_groups(
-    select: str | None = "id,displayName,planner,description,createdDateTime",
+    select: str | None = "id,displayName,mail",
     filter: str | None = None,
     expand: str | None = None,
+    top: int | None = None,
 ) -> list[Group] | None:
     """List all Microsoft 365 groups the authenticated user is a member of.
     
     Args:
-        select: Comma-separated list of Group fields to include. Default is "id,displayName,planner,description,createdDateTime". Pass "*all" for all fields.
+        select: Comma-separated list of Group fields to include. Default is "id,displayName,mail". Pass "*all" for all fields.
         filter: OData filter string to filter groups, e.g. "startsWith(displayName,'Project')". Use OData filter syntax.
         expand: Comma-separated list of related entities to expand. Use OData expand syntax, e.g. "members($select=id,displayName)".
+        top: The maximum number of groups to return. Use OData $top syntax.
 
     Returns:
         A list of Group objects, or None if the user belongs to no groups.
@@ -48,7 +51,7 @@ async def list_my_groups(
 
     # The Graph SDK's $select parameter requires a list of field names, not a
     # comma-separated string. We split here so callers can use the natural
-    # "id,title,owner" syntax without needing to know the SDK's internal shape.
+    # "id,displayName,mail" syntax without needing to know the SDK's internal shape.
     select_fields = (
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
@@ -62,16 +65,17 @@ async def list_my_groups(
         # response includes roles, admin units, and other non-group objects that
         # cannot be passed to list_group_plans or create_plan.
         # Docs: https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof
-        groups = await PlannerService.paginate(
-            graph_client.me.transitive_member_of.graph_group,
+        groups = await graph_client.me.transitive_member_of.graph_group().get(
             RequestConfiguration(
-                query_parameters=GroupsRequestBuilder.GroupsRequestBuilderGetQueryParameters(
+                query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
                     select=select_fields,
                     filter=filter,  # OData filter string, e.g. "startsWith(displayName,'Project')"
-                    expand=expand  # OData expand string, e.g. "members($select=id,displayName)"
+                    expand=expand,  # OData expand string, e.g. "members($select=id,displayName)"
+                    top=top  # OData $top value, e.g. 10
                 )
             ),
         )
+        
 
     if ctx is not None:
         await ctx.debug(f"Found {len(groups)} group(s)")

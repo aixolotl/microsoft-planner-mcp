@@ -4,7 +4,7 @@ from __future__ import annotations
 # OpenTelemetry must be configured before FastMCP is imported so the
 # TracerProvider is in place when FastMCP's instrumentation hooks initialise.
 # configure() is a safe no-op when OTEL_EXPORTER_OTLP_ENDPOINT is absent.
-# Docs: https://gofastmcp.com/servers/telemetry
+# Docs: https://gofastmcp.com/servers/telemetry#programmatic-configuration
 from .telemetry import configure as _configure_telemetry
 _configure_telemetry()
 

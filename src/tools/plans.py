@@ -22,13 +22,17 @@ plans_router = FastMCP("plans")
 async def list_my_plans(
     select: str | None = "id,title,owner,createdBy,createdDateTime",
 ) -> list[PlannerPlan] | None:
-    """List all Planner plans accessible to the authenticated user.
+    """List Planner plans directly associated with the authenticated user.
+
+    Note: this endpoint only returns plans the user personally owns or has a direct
+    relationship with. Group-owned plans (the common case) do not appear here —
+    use list_group_plans with a group_id from list_my_groups instead.
 
     Args:
         select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,createdBy,createdDateTime". Pass "*all" for all fields.
 
     Returns:
-        A list of PlannerPlan objects, or None if the user has no plans.
+        A list of PlannerPlan objects, or None if the user has no directly-owned plans.
     """
     token = get_access_token()
     if token is None:
@@ -78,7 +82,7 @@ async def list_group_plans(
     """List all Planner plans belonging to a Microsoft 365 group.
 
     Args:
-        group_id: The object ID of the group (available as plan.owner from list_my_plans).
+        group_id: The object ID of the group (from list_my_groups).
         select: Comma-separated list of PlannerPlan fields to include. Default is "id,title,owner,createdBy,createdDateTime". Pass "*all" for all fields.
 
     Returns:
@@ -142,7 +146,7 @@ async def create_plan(group_id: str, title: str) -> PlannerPlan | None:
     """Create a new Planner plan for a Microsoft 365 group.
 
     Args:
-        group_id: The object ID of the M365 group that will own the plan (e.g. from list_group_plans or Teams).
+        group_id: The object ID of the M365 group that will own the plan (from list_my_groups).
         title: The display title for the new plan.
 
     Returns:
