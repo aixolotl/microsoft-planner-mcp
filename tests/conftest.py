@@ -43,6 +43,8 @@ def _disable_serialize(monkeypatch):
     not with Kiota JSON serialisation. Defaulting serialize=False keeps tool
     tests decoupled from the serialisation format. Tests that specifically need
     to verify serialisation behaviour can override with serialize=True.
+
+    Docs: https://learn.microsoft.com/en-us/openapi/kiota/serialization
     """
     _orig_init = PlannerService.__init__
 

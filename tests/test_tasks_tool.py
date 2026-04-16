@@ -56,7 +56,7 @@ def make_tasks_result(tasks) -> MagicMock:
     return result
 
 
-def make_patch_svc(return_value=None, side_effect=None) -> MagicMock:
+def make_patching_graph_client(return_value=None, side_effect=None) -> MagicMock:
     """Build a mock graph_client whose task/details builders return the given value.
 
     The real PlannerService is instantiated by the tool (not mocked), so we
@@ -208,7 +208,7 @@ async def test_get_task_details_returns_none_when_not_found(graph_ctx):
 
 async def test_update_task_returns_updated_task(graph_ctx):
     updated = make_task(title="Updated")
-    graph_client = make_patch_svc(return_value=updated)
+    graph_client = make_patching_graph_client(return_value=updated)
 
     with graph_ctx(MODULE, graph_client):
         result = await update_task("task-1", '"etag-v1"', title="Updated")
@@ -217,6 +217,10 @@ async def test_update_task_returns_updated_task(graph_ctx):
     graph_client.planner.tasks.by_planner_task_id.return_value.patch.assert_awaited_once()
     call_kwargs = graph_client.planner.tasks.by_planner_task_id.return_value.patch.call_args
     assert call_kwargs.args[0].title == "Updated"
+    # Verify the tool forwards the ETag and requests return=representation.
+    config = call_kwargs.kwargs["request_configuration"]
+    assert config.headers.get("if-match") == {'"etag-v1"'}
+    assert config.headers.get("prefer") == {"return=representation"}
 
 
 @pytest.mark.parametrize("field,value,attr", [
@@ -225,7 +229,7 @@ async def test_update_task_returns_updated_task(graph_ctx):
     ("assignee_priority", "8585!", "assignee_priority"),
 ], ids=["percent-complete", "bucket-id", "assignee-priority"])
 async def test_update_task_sets_scalar_fields(field, value, attr, graph_ctx):
-    graph_client = make_patch_svc(return_value=make_task())
+    graph_client = make_patching_graph_client(return_value=make_task())
 
     with graph_ctx(MODULE, graph_client):
         await update_task("task-1", '"etag-v1"', **{field: value})
@@ -239,7 +243,7 @@ async def test_update_task_sets_scalar_fields(field, value, attr, graph_ctx):
     ("2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
 ], ids=["naive-datetime-assumed-utc", "offset-datetime-converted-to-utc"])
 async def test_update_task_converts_due_date_to_utc(due_str, expected_utc, graph_ctx):
-    graph_client = make_patch_svc(return_value=make_task())
+    graph_client = make_patching_graph_client(return_value=make_task())
 
     with graph_ctx(MODULE, graph_client):
         await update_task("task-1", '"etag-v1"', due_date_time=due_str)
@@ -249,7 +253,7 @@ async def test_update_task_converts_due_date_to_utc(due_str, expected_utc, graph
 
 
 async def test_update_task_assign_users_builds_correct_additional_data(graph_ctx):
-    graph_client = make_patch_svc(return_value=make_task())
+    graph_client = make_patching_graph_client(return_value=make_task())
 
     with graph_ctx(MODULE, graph_client):
         await update_task("task-1", '"etag-v1"', assign_user_ids=["user-a"], unassign_user_ids=["user-b"])
@@ -264,7 +268,7 @@ async def test_update_task_assign_users_builds_correct_additional_data(graph_ctx
 
 async def test_update_task_no_fields_sends_empty_body(graph_ctx):
     """Calling update_task with only required args sends an empty PlannerTask body."""
-    graph_client = make_patch_svc(return_value=make_task())
+    graph_client = make_patching_graph_client(return_value=make_task())
 
     with graph_ctx(MODULE, graph_client):
         await update_task("task-1", '"etag-v1"')
@@ -281,7 +285,7 @@ async def test_update_task_no_fields_sends_empty_body(graph_ctx):
 
 async def test_update_task_details_returns_updated_details(graph_ctx):
     updated = make_details("new desc")
-    graph_client = make_patch_svc(return_value=updated)
+    graph_client = make_patching_graph_client(return_value=updated)
 
     with graph_ctx(MODULE, graph_client):
         result = await update_task_details("task-1", '"etag-v1"', description="new desc")
@@ -293,7 +297,7 @@ async def test_update_task_details_returns_updated_details(graph_ctx):
 
 
 async def test_update_task_details_sets_checklist_and_references(graph_ctx):
-    graph_client = make_patch_svc(return_value=make_details())
+    graph_client = make_patching_graph_client(return_value=make_details())
     checklist = {"guid-1": {"@odata.type": "microsoft.graph.plannerChecklistItem", "title": "Step 1", "isChecked": False}}
     refs = {"https%3A//example%2Ecom": {"@odata.type": "microsoft.graph.plannerExternalReference", "alias": "Ref"}}
 
@@ -310,7 +314,7 @@ async def test_update_task_details_auto_injects_odata_type(graph_ctx):
     tool injects them automatically when missing. Without auto-injection,
     Graph returns 400: 'The given untyped value … is invalid.'
     Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update"""
-    graph_client = make_patch_svc(return_value=make_details())
+    graph_client = make_patching_graph_client(return_value=make_details())
     # Deliberately omit @odata.type from both checklist items and references.
     checklist = {"guid-1": {"title": "Step 1", "isChecked": False}}
     refs = {"https%3A//example%2Ecom": {"alias": "Ref"}}
@@ -325,7 +329,7 @@ async def test_update_task_details_auto_injects_odata_type(graph_ctx):
 
 async def test_update_task_details_preserves_explicit_odata_type(graph_ctx):
     """When callers already provide @odata.type, the tool must not overwrite it."""
-    graph_client = make_patch_svc(return_value=make_details())
+    graph_client = make_patching_graph_client(return_value=make_details())
     checklist = {"guid-1": {"@odata.type": "#microsoft.graph.plannerChecklistItem", "title": "Step 1", "isChecked": False}}
 
     with graph_ctx(MODULE, graph_client):
@@ -339,7 +343,7 @@ async def test_update_task_details_preserves_explicit_odata_type(graph_ctx):
 async def test_update_task_details_null_delete_entries_unaffected(graph_ctx):
     """Null values (used to delete a checklist item or reference) must pass
     through without modification — they are not dicts and have no @odata.type."""
-    graph_client = make_patch_svc(return_value=make_details())
+    graph_client = make_patching_graph_client(return_value=make_details())
     checklist = {"guid-to-delete": None, "guid-keep": {"title": "Keep", "isChecked": False}}
 
     with graph_ctx(MODULE, graph_client):
@@ -353,7 +357,7 @@ async def test_update_task_details_null_delete_entries_unaffected(graph_ctx):
 async def test_update_task_details_does_not_mutate_caller_dicts(graph_ctx):
     """The tool copies dicts before injecting @odata.type. Without the copy,
     callers that reuse the dict would see unexpected extra keys."""
-    graph_client = make_patch_svc(return_value=make_details())
+    graph_client = make_patching_graph_client(return_value=make_details())
     checklist = {"guid-1": {"title": "Step 1", "isChecked": False}}
     refs = {"https%3A//example%2Ecom": {"alias": "Ref"}}
 
@@ -376,7 +380,7 @@ async def test_update_task_details_encodes_reference_keys(raw_key, expected_key,
     LLM callers typically send raw URLs; the tool encodes them automatically.
     Already-encoded keys must pass through unchanged (idempotent).
     Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update"""
-    graph_client = make_patch_svc(return_value=make_details())
+    graph_client = make_patching_graph_client(return_value=make_details())
     refs = {raw_key: {"alias": "Test"}}
 
     with graph_ctx(MODULE, graph_client):
@@ -393,7 +397,7 @@ async def test_update_task_details_sets_preview_type(preview_type, graph_ctx):
     """All five documented previewType values must be accepted and forwarded."""
     from msgraph.generated.models.planner_preview_type import PlannerPreviewType
 
-    graph_client = make_patch_svc(return_value=make_details())
+    graph_client = make_patching_graph_client(return_value=make_details())
 
     with graph_ctx(MODULE, graph_client):
         await update_task_details("task-1", '"etag-v1"', preview_type=preview_type)
@@ -404,7 +408,7 @@ async def test_update_task_details_sets_preview_type(preview_type, graph_ctx):
 
 async def test_update_task_details_invalid_preview_type_raises(graph_ctx):
     """An invalid previewType value must raise ValueError, not silently pass through."""
-    graph_client = make_patch_svc(return_value=make_details())
+    graph_client = make_patching_graph_client(return_value=make_details())
 
     with graph_ctx(MODULE, graph_client):
         with pytest.raises(ValueError):
@@ -416,7 +420,7 @@ async def test_update_task_details_invalid_preview_type_raises(graph_ctx):
     (400, "BadRequest", ODataError),
 ], ids=["403-value-error", "400-reraises"])
 async def test_update_task_details_odata_error(status, code, exc_type, graph_ctx, make_odata_error):
-    graph_client = make_patch_svc(side_effect=make_odata_error(status, code))
+    graph_client = make_patching_graph_client(side_effect=make_odata_error(status, code))
 
     with graph_ctx(MODULE, graph_client):
         with pytest.raises(exc_type) as exc_info:
@@ -434,7 +438,7 @@ async def test_update_task_details_odata_error(status, code, exc_type, graph_ctx
 
 
 async def test_delete_task_delegates_to_sdk(graph_ctx):
-    graph_client = make_patch_svc()
+    graph_client = make_patching_graph_client()
 
     with graph_ctx(MODULE, graph_client):
         result = await delete_task("task-1", '"etag-v1"')

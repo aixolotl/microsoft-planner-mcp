@@ -31,7 +31,7 @@ async def list_my_groups(
     # endpoint does not support $expand — Graph returns a 400 BadRequest when
     # it is included. If group expansion is needed in future, use a separate
     # per-group GET with $expand instead.
-) -> list[dict] | list[Group] | None:
+) -> list[dict] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")

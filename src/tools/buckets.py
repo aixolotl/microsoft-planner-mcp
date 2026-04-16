@@ -26,7 +26,7 @@ buckets_router = FastMCP("buckets")
 )
 async def list_buckets(
     plan_id: Annotated[str, "The ID of the plan to list buckets for (from list_my_plans or list_group_plans)."],
-) -> list[dict] | list[PlannerBucket] | None:
+) -> list[dict] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -60,7 +60,7 @@ async def list_buckets(
 async def create_bucket(
     plan_id: Annotated[str, "The ID of the plan to create the bucket in (from list_my_plans or list_group_plans)."],
     name: Annotated[str, "The display name for the new bucket."],
-) -> dict | PlannerBucket | None:
+) -> dict | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")

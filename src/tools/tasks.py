@@ -43,7 +43,7 @@ tasks_router = FastMCP("tasks")
 )
 async def list_my_tasks(
     select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
-) -> list[dict] | list[PlannerTask] | None:
+) -> list[dict] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -95,7 +95,7 @@ async def list_my_tasks(
 async def list_tasks(
     plan_id: Annotated[str, "The ID of the plan to list tasks for (from list_my_plans or list_group_plans)."],
     select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
-) -> list[dict] | list[PlannerTask] | None:
+) -> list[dict] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -144,7 +144,7 @@ async def create_task(
     due_date_time: Annotated[str | None, "ISO 8601 due date (e.g. '2026-05-31T00:00:00')."] = None,
     percent_complete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
     assign_user_ids: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
-) -> dict | PlannerTask | None:
+) -> dict | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -207,7 +207,7 @@ async def create_task(
 )
 async def get_task_details(
     task_id: Annotated[str, "The ID of the task to retrieve details for (from list_my_tasks or list_tasks)."],
-) -> dict | PlannerTaskDetails | None:
+) -> dict | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -240,7 +240,7 @@ async def update_task(
     assignee_priority: Annotated[str | None, "Order hint string for sorting within the assignee's task list."] = None,
     assign_user_ids: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
     unassign_user_ids: Annotated[list[str] | None, "List of user object IDs to remove from the task."] = None,
-) -> dict | PlannerTask | None:
+) -> dict | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -286,7 +286,7 @@ async def update_task_details(
     preview_type: Annotated[str | None, "Preview style shown in Planner UI. One of: automatic, noPreview, checklist, description, reference."] = None,
     checklist_items: Annotated[dict | None, "Dict keyed by checklist item GUID. Pass null for a key to delete that item."] = None,
     references: Annotated[dict | None, "Dict keyed by URL-encoded reference URL (periods to %2E, colons to %3A). Pass null for a key to delete that reference."] = None,
-) -> dict | PlannerTaskDetails | None:
+) -> dict | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")

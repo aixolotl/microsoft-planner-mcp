@@ -21,7 +21,7 @@ me_router = FastMCP("me")
     tags={"users", "read"},
     annotations={"readOnlyHint": True},
 )
-async def get_me() -> dict | User | None:
+async def get_me() -> dict | None:
     # get_access_token() returns the FastMCP session token injected by
     # AzureProvider after the OAuth flow completes. It is None when the request
     # arrives without a valid session (e.g. a bare HTTP call without the

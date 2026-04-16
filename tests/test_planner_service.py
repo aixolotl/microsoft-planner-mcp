@@ -121,6 +121,64 @@ async def test_with_retry_non_retryable_raises(status, code, make_odata_error):
     refresh.assert_not_awaited()
 
 
+# ---------------------------------------------------------------------------
+# serialize_graph_object / serialize_graph_list
+# ---------------------------------------------------------------------------
+
+
+def test_serialize_graph_object_returns_dict():
+    """Verifies Kiota model → dict round-trip produces correct output."""
+    svc = PlannerService(MagicMock(), serialize=True)
+    task = PlannerTask()
+    task.id = "task-abc"
+    task.title = "Ship feature"
+    task.percent_complete = 50
+
+    result = svc.serialize_graph_object(task)
+
+    assert isinstance(result, dict)
+    assert result["id"] == "task-abc"
+    assert result["title"] == "Ship feature"
+    assert result["percentComplete"] == 50
+
+
+def test_serialize_graph_object_returns_raw_when_disabled():
+    """When serialize=False the original Kiota object is returned unchanged."""
+    svc = PlannerService(MagicMock(), serialize=False)
+    task = PlannerTask()
+    task.id = "task-abc"
+
+    result = svc.serialize_graph_object(task)
+
+    assert result is task
+
+
+def test_serialize_graph_list_returns_list_of_dicts():
+    svc = PlannerService(MagicMock(), serialize=True)
+    t1 = PlannerTask()
+    t1.id = "t1"
+    t1.title = "First"
+    t2 = PlannerTask()
+    t2.id = "t2"
+    t2.title = "Second"
+
+    result = svc.serialize_graph_list([t1, t2])
+
+    assert len(result) == 2
+    assert all(isinstance(r, dict) for r in result)
+    assert result[0]["id"] == "t1"
+    assert result[1]["title"] == "Second"
+
+
+def test_serialize_graph_list_returns_raw_when_disabled():
+    svc = PlannerService(MagicMock(), serialize=False)
+    tasks = [PlannerTask(), PlannerTask()]
+
+    result = svc.serialize_graph_list(tasks)
+
+    assert result is tasks
+
+
 async def test_with_retry_sends_fresh_etag_in_if_match_header(make_odata_error):
     """Integration-style: verifies the If-Match header carries the refreshed ETag.
 

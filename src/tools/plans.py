@@ -34,7 +34,7 @@ plans_router = FastMCP("plans")
 )
 async def list_my_plans(
     select: Annotated[str | None, "Comma-separated list of PlannerPlan fields to include. Pass '*all' for all fields."] = "id,title,owner,createdBy,createdDateTime",
-) -> list[dict] | list[PlannerPlan] | None:
+) -> list[dict] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -85,7 +85,7 @@ async def list_my_plans(
 async def list_group_plans(
     group_id: Annotated[str, "The object ID of the group (from list_my_groups)."],
     select: Annotated[str | None, "Comma-separated list of PlannerPlan fields to include. Pass '*all' for all fields."] = "id,title,owner,createdBy,createdDateTime",
-) -> list[dict] | list[PlannerPlan] | None:
+) -> list[dict] | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -148,7 +148,7 @@ async def list_group_plans(
 async def create_plan(
     group_id: Annotated[str, "The object ID of the M365 group that will own the plan (from list_my_groups)."],
     title: Annotated[str, "The display title for the new plan."],
-) -> dict | PlannerPlan | None:
+) -> dict | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")

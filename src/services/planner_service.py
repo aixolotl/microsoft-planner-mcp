@@ -40,6 +40,7 @@ class PlannerService:
         # objects to plain dicts via JSON round-trip. Without serialization,
         # FastMCP's default serializer produces incomplete or opaque output
         # because it does not understand Kiota models.
+        # Docs: https://learn.microsoft.com/en-us/openapi/kiota/serialization
         self.serialize = serialize
 
     # ------------------------------------------------------------------
