@@ -20,7 +20,6 @@ async def list_my_groups(
     select: str | None = "id,displayName,mail",
     filter: str | None = None,
     expand: str | None = None,
-    top: int | None = None,
 ) -> list[Group] | None:
     """List all Microsoft 365 groups the authenticated user is a member of.
     
@@ -28,7 +27,6 @@ async def list_my_groups(
         select: Comma-separated list of Group fields to include. Default is "id,displayName,mail". Pass "*all" for all fields.
         filter: OData filter string to filter groups, e.g. "startsWith(displayName,'Project')". Use OData filter syntax.
         expand: Comma-separated list of related entities to expand. Use OData expand syntax, e.g. "members($select=id,displayName)".
-        top: The maximum number of groups to return. Use OData $top syntax.
 
     Returns:
         A list of Group objects, or None if the user belongs to no groups.
@@ -65,17 +63,16 @@ async def list_my_groups(
         # response includes roles, admin units, and other non-group objects that
         # cannot be passed to list_group_plans or create_plan.
         # Docs: https://learn.microsoft.com/en-us/graph/api/user-list-transitivememberof
-        groups = await graph_client.me.transitive_member_of.graph_group().get(
+        groups = await PlannerService.paginate(
+            graph_client.me.transitive_member_of.graph_group,
             RequestConfiguration(
                 query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
                     select=select_fields,
                     filter=filter,  # OData filter string, e.g. "startsWith(displayName,'Project')"
-                    expand=expand,  # OData expand string, e.g. "members($select=id,displayName)"
-                    top=top  # OData $top value, e.g. 10
+                    expand=expand  # OData expand string, e.g. "members($select=id,displayName)"                    
                 )
             ),
         )
-        
 
     if ctx is not None:
         await ctx.debug(f"Found {len(groups)} group(s)")
