@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
 from fastmcp.exceptions import AuthorizationError
+from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.group import Group
+from msgraph.generated.users.item.transitive_member_of.graph_group.graph_group_request_builder import GraphGroupRequestBuilder
 
 from src.tools.groups import list_my_groups
 
@@ -87,3 +89,58 @@ async def test_forwards_obo_token(token_capturing_ctx):
         await list_my_groups()
 
     assert received == ["my-obo"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: $select forwarding
+# ---------------------------------------------------------------------------
+
+
+async def test_default_select_includes_display_name_and_mail(graph_ctx):
+    # The default select must include displayName and mail so that LLM clients
+    # can identify groups by name. Without $select the Graph response omits
+    # these fields (returns null), making the groups indistinguishable.
+    graph_client = MagicMock()
+    get_mock = AsyncMock(return_value=make_groups_result([]))
+    graph_client.me.transitive_member_of.graph_group.get = get_mock
+
+    with graph_ctx(MODULE, graph_client):
+        await list_my_groups()
+
+    config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
+    assert config.query_parameters.select == ["id", "displayName", "mail"]
+
+
+@pytest.mark.parametrize(
+    "select_arg,expected_fields",
+    [
+        ("id,displayName", ["id", "displayName"]),
+        ("id", ["id"]),
+    ],
+    ids=["two-fields", "single-field"],
+)
+async def test_custom_select_is_forwarded(select_arg, expected_fields, graph_ctx):
+    graph_client = MagicMock()
+    get_mock = AsyncMock(return_value=make_groups_result([]))
+    graph_client.me.transitive_member_of.graph_group.get = get_mock
+
+    with graph_ctx(MODULE, graph_client):
+        await list_my_groups(select=select_arg)
+
+    config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
+    assert config.query_parameters.select == expected_fields
+
+
+async def test_all_sentinel_omits_select(graph_ctx):
+    # "*all" is a sentinel meaning "no $select — return every field". Without
+    # this path, callers would have to pass select=None explicitly to get the
+    # full Graph response, which is less ergonomic for LLM agents.
+    graph_client = MagicMock()
+    get_mock = AsyncMock(return_value=make_groups_result([]))
+    graph_client.me.transitive_member_of.graph_group.get = get_mock
+
+    with graph_ctx(MODULE, graph_client):
+        await list_my_groups(select="*all")
+
+    config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
+    assert config.query_parameters.select is None
