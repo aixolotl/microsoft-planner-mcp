@@ -173,6 +173,60 @@ async def test_list_my_tasks_select(select_arg, expected, graph_ctx):
     assert captured[0].query_parameters.select == expected
 
 
+async def test_list_my_tasks_filter_narrows_results(graph_ctx):
+    # Client-side filter should remove non-matching tasks from the response.
+    # Graph Planner ignores $filter on /me/planner/tasks, so filtering is
+    # applied in Python after all tasks are fetched via pagination.
+    tasks = [make_task("t1", "Project Alpha"), make_task("t2", "Bug Fix")]
+    graph_client = MagicMock()
+    graph_client.me.planner.tasks.get = AsyncMock(return_value=make_tasks_result(tasks))
+
+    with graph_ctx(MODULE, graph_client):
+        result = await list_my_tasks(filter="startswith(title, 'Project')")
+
+    assert len(result) == 1
+    assert result[0].title == "Project Alpha"
+
+
+async def test_list_my_tasks_search_narrows_results(graph_ctx):
+    tasks = [make_task("t1", "Project Alpha"), make_task("t2", "Bug Fix")]
+    graph_client = MagicMock()
+    graph_client.me.planner.tasks.get = AsyncMock(return_value=make_tasks_result(tasks))
+
+    with graph_ctx(MODULE, graph_client):
+        result = await list_my_tasks(search="bug")
+
+    assert len(result) == 1
+    assert result[0].title == "Bug Fix"
+
+
+async def test_list_my_tasks_filter_no_match_returns_none(graph_ctx):
+    # When all items are filtered out, the tool returns None (same as
+    # empty paginated response) so the LLM receives a clear "no results".
+    tasks = [make_task("t1", "Alpha")]
+    graph_client = MagicMock()
+    graph_client.me.planner.tasks.get = AsyncMock(return_value=make_tasks_result(tasks))
+
+    with graph_ctx(MODULE, graph_client):
+        result = await list_my_tasks(filter="title eq 'Nonexistent'")
+
+    assert result is None
+
+
+async def test_list_my_tasks_filter_not_sent_to_graph(graph_ctx):
+    # filter/search/count must NOT appear in the RequestConfiguration sent
+    # to Graph — they are applied client-side only.
+    graph_client, captured = make_capturing_client()
+
+    with graph_ctx(MODULE, graph_client):
+        await list_my_tasks(filter="title eq 'x'", search="y")
+
+    config = captured[0]
+    assert not hasattr(config.query_parameters, "filter") or config.query_parameters.filter is None
+    assert not hasattr(config.query_parameters, "search") or config.query_parameters.search is None
+    assert not hasattr(config.query_parameters, "count") or config.query_parameters.count is None
+
+
 # ---------------------------------------------------------------------------
 # get_task_details
 # ---------------------------------------------------------------------------
@@ -488,6 +542,59 @@ async def test_list_tasks_select(select_arg, expected, graph_ctx):
         await list_tasks("plan-1", **select_arg)
 
     assert captured[0].query_parameters.select == expected
+
+
+async def test_list_tasks_filter_narrows_results(graph_ctx):
+    tasks = [make_task("t1", "Project Alpha"), make_task("t2", "Bug Fix")]
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.tasks.get = AsyncMock(
+        return_value=make_tasks_result(tasks)
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        result = await list_tasks("plan-1", filter="title eq 'Bug Fix'")
+
+    assert len(result) == 1
+    assert result[0].title == "Bug Fix"
+
+
+async def test_list_tasks_search_narrows_results(graph_ctx):
+    tasks = [make_task("t1", "Project Alpha"), make_task("t2", "Bug Fix")]
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.tasks.get = AsyncMock(
+        return_value=make_tasks_result(tasks)
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        result = await list_tasks("plan-1", search="alpha")
+
+    assert len(result) == 1
+    assert result[0].title == "Project Alpha"
+
+
+async def test_list_tasks_filter_no_match_returns_none(graph_ctx):
+    tasks = [make_task("t1", "Alpha")]
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.tasks.get = AsyncMock(
+        return_value=make_tasks_result(tasks)
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        result = await list_tasks("plan-1", filter="title eq 'Nonexistent'")
+
+    assert result is None
+
+
+async def test_list_tasks_filter_not_sent_to_graph(graph_ctx):
+    graph_client, captured = make_plan_capturing_client()
+
+    with graph_ctx(MODULE, graph_client):
+        await list_tasks("plan-1", filter="title eq 'x'", search="y")
+
+    config = captured[0]
+    assert not hasattr(config.query_parameters, "filter") or config.query_parameters.filter is None
+    assert not hasattr(config.query_parameters, "search") or config.query_parameters.search is None
+    assert not hasattr(config.query_parameters, "count") or config.query_parameters.count is None
 
 
 # ---------------------------------------------------------------------------

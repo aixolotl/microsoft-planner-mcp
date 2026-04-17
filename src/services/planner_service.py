@@ -15,6 +15,7 @@ is raised from _refresh_task_etag.
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any, TypeVar
@@ -25,6 +26,8 @@ from kiota_serialization_json.json_serialization_writer import JsonSerialization
 from msgraph import GraphServiceClient
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph_core.tasks.page_iterator import PageIterator
+from odata_v4_query import ODataFilterParser
+from odata_v4_query.filter_parser import FilterNode
 
 from ..types import CollectionRequestBuilder
 
@@ -103,6 +106,199 @@ class PlannerService:
         page_iterator = PageIterator(result, request_builder.request_adapter)
         await page_iterator.iterate(lambda item: all_items.append(item) or True)
         return all_items
+
+    # ------------------------------------------------------------------
+    # Client-side OData filter / search
+    # ------------------------------------------------------------------
+    # The Graph Planner API ignores $filter and $search on
+    # /me/planner/tasks and /planner/plans/{id}/tasks, so we fetch all
+    # items via paginate() above and apply filtering in Python.
+    # Parsing is delegated to odata-v4-query; evaluation walks the AST
+    # against object attributes.
+    # Docs (Graph limitation): https://github.com/aixolotl/microsoft-planner-mcp/issues/29
+
+    # OData uses camelCase field names; Kiota models use snake_case.
+    # This regex converts camelCase → snake_case so getattr() works on
+    # raw SDK objects. Without it, ``filter=percentComplete eq 50``
+    # would fail because PlannerTask uses ``percent_complete``.
+    _CAMEL_RE = re.compile(r"(?<=[a-z0-9])([A-Z])")
+
+    @classmethod
+    def _to_snake(cls, name: str) -> str:
+        return cls._CAMEL_RE.sub(r"_\1", name).lower()
+
+    _filter_parser = ODataFilterParser()
+
+    @classmethod
+    def _get_attr(cls, item: Any, field_name: str) -> Any:
+        """Resolve a field on a Kiota model object using snake_case conversion.
+
+        OData filter expressions use camelCase (``percentComplete``), but Kiota
+        SDK models expose attributes in snake_case (``percent_complete``).
+        This helper converts and falls back to the original name so both forms
+        work. Returns ``None`` when the attribute does not exist.
+        """
+        snake = cls._to_snake(field_name)
+        val = getattr(item, snake, None)
+        if val is None and snake != field_name:
+            val = getattr(item, field_name, None)
+        return val
+
+    @classmethod
+    def _eval_node(cls, node: FilterNode, item: Any) -> Any:
+        """Walk a FilterNode AST and evaluate it against a single item.
+
+        Returns a bool for logical/comparison nodes, or a Python value for
+        literal/identifier/function nodes used as sub-expressions.
+
+        Raises ValueError for unsupported node types or operators.
+        """
+        if node.type_ == "literal":
+            return node.value
+
+        if node.type_ == "identifier":
+            if node.value is None:
+                return None
+            # OData boolean keywords ``true``, ``false``, and ``null`` are
+            # parsed as identifiers by odata-v4-query, not as literals.
+            # Without this check, ``hasDescription eq true`` would attempt
+            # getattr(item, "true") and always return None → mismatch.
+            lower = node.value.lower()
+            if lower == "true":
+                return True
+            if lower == "false":
+                return False
+            if lower == "null":
+                return None
+            return cls._get_attr(item, node.value)
+
+        if node.type_ == "function":
+            return cls._eval_function(node, item)
+
+        if node.type_ == "operator":
+            return cls._eval_operator(node, item)
+
+        raise ValueError(f"Unsupported filter node type: {node.type_!r}")
+
+    @classmethod
+    def _eval_function(cls, node: FilterNode, item: Any) -> bool:
+        """Evaluate a function call node (startswith, endswith, contains)."""
+        fn_name = (node.value or "").lower()
+        args = node.arguments or []
+        if fn_name in ("startswith", "endswith", "contains") and len(args) == 2:
+            field_val = cls._eval_node(args[0], item)
+            literal_val = cls._eval_node(args[1], item)
+            if field_val is None or literal_val is None:
+                return False
+            field_str = str(field_val).lower()
+            literal_str = str(literal_val).lower()
+            if fn_name == "startswith":
+                return field_str.startswith(literal_str)
+            if fn_name == "endswith":
+                return field_str.endswith(literal_str)
+            return literal_str in field_str  # contains
+        raise ValueError(
+            f"Unsupported filter function: {fn_name}({len(args)} args). "
+            "Supported: startswith(field, value), endswith(field, value), "
+            "contains(field, value)."
+        )
+
+    @classmethod
+    def _eval_operator(cls, node: FilterNode, item: Any) -> bool:
+        """Evaluate a comparison or logical operator node."""
+        op = (node.value or "").lower()
+
+        # Logical: and, or, not
+        if op == "and":
+            return bool(cls._eval_node(node.left, item)) and bool(cls._eval_node(node.right, item))
+        if op == "or":
+            return bool(cls._eval_node(node.left, item)) or bool(cls._eval_node(node.right, item))
+        if op == "not":
+            return not bool(cls._eval_node(node.right, item))
+
+        # Comparison: eq, ne, gt, ge, lt, le
+        left = cls._eval_node(node.left, item)
+        right = cls._eval_node(node.right, item)
+
+        # Case-insensitive string comparison for LLM ergonomics.
+        # Without this, ``title eq 'hello'`` would not match ``title='Hello'``.
+        if isinstance(left, str) and isinstance(right, str):
+            left = left.lower()
+            right = right.lower()
+
+        if op == "eq":
+            return left == right
+        if op == "ne":
+            return left != right
+        if op in ("gt", "ge", "lt", "le"):
+            if left is None or right is None:
+                return False
+            if op == "gt":
+                return left > right
+            if op == "ge":
+                return left >= right
+            if op == "lt":
+                return left < right
+            return left <= right
+
+        raise ValueError(
+            f"Unsupported filter operator: {op!r}. "
+            "Supported: eq, ne, gt, ge, lt, le, and, or, not."
+        )
+
+    @classmethod
+    def filter_items(
+        cls,
+        items: list,
+        *,
+        filter: str | None = None,
+        search: str | None = None,
+        search_fields: list[str] | None = None,
+    ) -> list:
+        """Apply OData-like $filter and $search expressions client-side.
+
+        The Graph Planner API ignores $filter/$search on task endpoints, so
+        this method applies them in Python after all items have been fetched.
+        Parsing uses odata-v4-query's ODataFilterParser; evaluation walks the
+        AST against item attributes using getattr().
+
+        Args:
+            items: List of Kiota model objects (e.g. PlannerTask).
+            filter: OData $filter expression string, e.g. "title eq 'Hello'".
+            search: Free-text search term. Matched as a case-insensitive
+                substring against each field in *search_fields*.
+            search_fields: Attribute names (camelCase) to search. Defaults
+                to ["title"] when *search* is provided.
+
+        Returns:
+            Filtered list. May be empty.
+
+        Raises:
+            ValueError: If the filter expression uses unsupported syntax.
+        """
+        if not items:
+            return items
+
+        result = items
+
+        if filter:
+            ast = cls._filter_parser.parse(filter)
+            result = [item for item in result if cls._eval_node(ast, item)]
+
+        if search:
+            # Strip surrounding quotes if present — LLM callers often pass
+            # search terms quoted (e.g. ``"Project"``).
+            term = search.strip().strip('"').strip("'").lower()
+            fields = search_fields or ["title"]
+            result = [
+                item for item in result
+                if any(
+                    term in str(cls._get_attr(item, f) or "").lower()
+                    for f in fields
+                )
+            ]
+
+        return result
 
     @staticmethod
     def to_utc(s: str) -> datetime:
