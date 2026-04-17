@@ -42,7 +42,7 @@ tasks_router = FastMCP("tasks")
     annotations={"readOnlyHint": True},
 )
 async def list_my_tasks(
-    select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
+    select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "*all",
 ) -> list[dict] | None:
     token = get_access_token()
     if token is None:
@@ -97,7 +97,7 @@ async def list_my_tasks(
 )
 async def list_tasks(
     plan_id: Annotated[str, "The ID of the plan to list tasks for (from list_my_plans or list_group_plans)."],
-    select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "id,title,planId,bucketId,percentComplete,dueDateTime,assignments",
+    select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "*all",
 ) -> list[dict] | None:
     token = get_access_token()
     if token is None:
