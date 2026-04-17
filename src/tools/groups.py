@@ -75,9 +75,8 @@ async def list_my_groups(
             query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
                 select=select_fields,
                 filter=filter,
-                search=search,
+                search=search, 
                 count=True if filter or search else None,
-                expand=expand,
             ),
         )
         # $filter on /me/transitiveMemberOf/microsoft.graph.group is an
