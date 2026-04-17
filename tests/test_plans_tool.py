@@ -7,8 +7,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastmcp.exceptions import AuthorizationError
-from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
+from msgraph.generated.models.user import User
 
 from src.tools.plans import create_plan, delete_plan, list_group_plans, list_my_plans
 
@@ -55,6 +55,29 @@ def make_capturing_client() -> tuple[MagicMock, list]:
     client = MagicMock()
     client.me.planner.plans.get = capturing_get
     return client, captured
+
+
+def _wire_create_plan_client(graph_client: MagicMock, plan: PlannerPlan | None = None) -> MagicMock:
+    """Wire up a graph_client mock so create_plan's auto-share logic works.
+
+    create_plan does:  POST plan → GET /me → GET plan details → PATCH sharedWith.
+    Without these stubs the test raises AttributeError on the mock chains.
+    """
+    if plan is None:
+        plan = make_plan()
+    graph_client.planner.plans.post = AsyncMock(return_value=plan)
+
+    me = User()
+    me.id = "user-123"
+    graph_client.me.get = AsyncMock(return_value=me)
+
+    plan_item = graph_client.planner.plans.by_planner_plan_id.return_value
+    details_mock = MagicMock()
+    details_mock.additional_data = {"@odata.etag": '"details-etag-v1"'}
+    plan_item.details.get = AsyncMock(return_value=details_mock)
+    plan_item.details.patch = AsyncMock(return_value=None)
+
+    return graph_client
 
 
 # ---------------------------------------------------------------------------
@@ -179,10 +202,8 @@ async def test_list_group_plans_non_403_odata_error_reraises(graph_ctx, make_oda
     )
 
     with graph_ctx(MODULE, graph_client):
-        with pytest.raises(ODataError) as exc_info:
+        with pytest.raises(RuntimeError, match="Graph API error \\(404\\)"):
             await list_group_plans("group-1")
-
-    assert exc_info.value.response_status_code == 404
 
 
 async def test_list_group_plans_forwards_obo_token(token_capturing_ctx):
@@ -204,8 +225,7 @@ async def test_list_group_plans_forwards_obo_token(token_capturing_ctx):
 
 async def test_create_plan_returns_plan(graph_ctx):
     plan = make_plan("new-plan-1", "Sprint 1")
-    graph_client = MagicMock()
-    graph_client.planner.plans.post = AsyncMock(return_value=plan)
+    graph_client = _wire_create_plan_client(MagicMock(), plan)
 
     with graph_ctx(MODULE, graph_client):
         result = await create_plan("group-1", "Sprint 1")
@@ -220,7 +240,7 @@ async def test_create_plan_posts_correct_body(graph_ctx):
         captured.append(body)
         return make_plan()
 
-    graph_client = MagicMock()
+    graph_client = _wire_create_plan_client(MagicMock())
     graph_client.planner.plans.post = capturing_post
 
     with graph_ctx(MODULE, graph_client):
@@ -234,7 +254,7 @@ async def test_create_plan_posts_correct_body(graph_ctx):
 
 @pytest.mark.parametrize("status,code,exc_type", [
     (403, "AuthorizationRequestDenied", ValueError),
-    (400, "BadRequest", ODataError),
+    (400, "BadRequest", RuntimeError),
 ], ids=["403-value-error", "400-reraises"])
 async def test_create_plan_odata_error(status, code, exc_type, graph_ctx, make_odata_error):
     graph_client = MagicMock()
@@ -247,12 +267,11 @@ async def test_create_plan_odata_error(status, code, exc_type, graph_ctx, make_o
     if exc_type is ValueError:
         assert "Cannot create plan" in str(exc_info.value)
     else:
-        assert exc_info.value.response_status_code == status
+        assert "Graph API error" in str(exc_info.value)
 
 
 async def test_create_plan_forwards_obo_token(token_capturing_ctx):
-    graph_client = MagicMock()
-    graph_client.planner.plans.post = AsyncMock(return_value=make_plan())
+    graph_client = _wire_create_plan_client(MagicMock())
 
     with token_capturing_ctx(MODULE, graph_client, "my-obo") as received:
         await create_plan("group-1", "My Plan")
@@ -260,37 +279,72 @@ async def test_create_plan_forwards_obo_token(token_capturing_ctx):
     assert received == ["my-obo"]
 
 
+async def test_create_plan_auto_shares_with_creator(graph_ctx):
+    # After creating a plan, create_plan should PATCH the plan details to add
+    # the creator to sharedWith so the plan appears in /me/planner/plans.
+    plan = make_plan("new-plan-1", "Sprint 1")
+    graph_client = _wire_create_plan_client(MagicMock(), plan)
+
+    with graph_ctx(MODULE, graph_client):
+        await create_plan("group-1", "Sprint 1")
+
+    plan_item = graph_client.planner.plans.by_planner_plan_id.return_value
+    plan_item.details.patch.assert_awaited_once()
+    patch_body = plan_item.details.patch.call_args.args[0]
+    assert patch_body.shared_with.additional_data == {"user-123": True}
+    config = plan_item.details.patch.call_args.kwargs["request_configuration"]
+    assert config.headers.get("if-match") == {'"details-etag-v1"'}
+
+
+async def test_create_plan_returns_plan_even_if_share_fails(graph_ctx):
+    # If the auto-share PATCH fails, the plan should still be returned.
+    plan = make_plan("new-plan-1", "Sprint 1")
+    graph_client = _wire_create_plan_client(MagicMock(), plan)
+    graph_client.me.get = AsyncMock(side_effect=Exception("Share failed"))
+
+    with graph_ctx(MODULE, graph_client):
+        result = await create_plan("group-1", "Sprint 1")
+
+    assert result is plan
+
+
+async def test_create_plan_returns_none_when_post_returns_none(graph_ctx):
+    graph_client = MagicMock()
+    graph_client.planner.plans.post = AsyncMock(return_value=None)
+
+    with graph_ctx(MODULE, graph_client):
+        result = await create_plan("group-1", "My Plan")
+
+    assert result is None
+
+
 # ---------------------------------------------------------------------------
 # Tests: delete_plan
 # ---------------------------------------------------------------------------
 
 
-async def test_delete_plan_calls_service(graph_ctx):
-    # PlannerService.delete_plan is the correct delegation path; patching it
-    # here isolates the tool from service internals so changes to retry logic
-    # do not break this test.
+async def test_delete_plan_calls_sdk(graph_ctx):
     graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.delete = AsyncMock()
 
-    with graph_ctx(MODULE, graph_client), \
-         patch(f"{MODULE}.PlannerService") as mock_svc_cls:
-        mock_svc = MagicMock()
-        mock_svc.delete_plan = AsyncMock()
-        mock_svc_cls.return_value = mock_svc
+    with graph_ctx(MODULE, graph_client):
+        result = await delete_plan("plan-1", '"etag-v1"')
 
-        await delete_plan("plan-1", '"etag-v1"')
+    graph_client.planner.plans.by_planner_plan_id.assert_called_once_with("plan-1")
+    delete_mock = graph_client.planner.plans.by_planner_plan_id.return_value.delete
+    delete_mock.assert_awaited_once()
+    # Verify the ETag reaches the If-Match header on the request configuration.
+    config = delete_mock.call_args.kwargs["request_configuration"]
+    assert config.headers.get("if-match") == {'"etag-v1"'}
 
-    mock_svc.delete_plan.assert_awaited_once_with("plan-1", '"etag-v1"')
+    assert result == "Deleted plan 'plan-1'."
 
 
 async def test_delete_plan_forwards_obo_token(token_capturing_ctx):
     graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.delete = AsyncMock()
 
-    with token_capturing_ctx(MODULE, graph_client, "my-obo") as received, \
-         patch(f"{MODULE}.PlannerService") as mock_svc_cls:
-        mock_svc = MagicMock()
-        mock_svc.delete_plan = AsyncMock()
-        mock_svc_cls.return_value = mock_svc
-
+    with token_capturing_ctx(MODULE, graph_client, "my-obo") as received:
         await delete_plan("plan-1", '"etag-v1"')
 
     assert received == ["my-obo"]

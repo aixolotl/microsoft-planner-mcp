@@ -144,3 +144,84 @@ async def test_all_sentinel_omits_select(graph_ctx):
 
     config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
     assert config.query_parameters.select is None
+
+
+# ---------------------------------------------------------------------------
+# Tests: $filter with advanced query headers
+# ---------------------------------------------------------------------------
+
+
+async def test_filter_adds_consistency_level_header(graph_ctx):
+    # $filter on /me/transitiveMemberOf/microsoft.graph.group is an advanced
+    # query — Graph requires ConsistencyLevel: eventual and $count=true.
+    # Without these, Graph returns 400 Request_UnsupportedQuery.
+    graph_client = MagicMock()
+    get_mock = AsyncMock(return_value=make_groups_result([]))
+    graph_client.me.transitive_member_of.graph_group.get = get_mock
+
+    with graph_ctx(MODULE, graph_client):
+        await list_my_groups(filter="startsWith(displayName,'Eng')")
+
+    config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
+    assert config.query_parameters.filter == "startsWith(displayName,'Eng')"
+    assert config.query_parameters.count is True
+    assert config.headers.get("ConsistencyLevel") == {"eventual"}
+
+
+async def test_no_filter_omits_advanced_query_headers(graph_ctx):
+    # When no filter is provided, advanced query headers must be absent so
+    # the request stays on the default (strongly-consistent) index.
+    graph_client = MagicMock()
+    get_mock = AsyncMock(return_value=make_groups_result([]))
+    graph_client.me.transitive_member_of.graph_group.get = get_mock
+
+    with graph_ctx(MODULE, graph_client):
+        await list_my_groups()
+
+    config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
+    assert config.query_parameters.filter is None
+    assert config.query_parameters.count is None
+    # Default RequestConfiguration headers should not contain ConsistencyLevel.
+    assert config.headers.get("ConsistencyLevel") == set()
+
+
+# ---------------------------------------------------------------------------
+# Tests: $search with advanced query headers
+# ---------------------------------------------------------------------------
+
+
+async def test_search_adds_consistency_level_header(graph_ctx):
+    # $search on /me/transitiveMemberOf/microsoft.graph.group is an advanced
+    # query — Graph requires ConsistencyLevel: eventual and $count=true.
+    # Without these, Graph returns 400 Request_UnsupportedQuery.
+    graph_client = MagicMock()
+    get_mock = AsyncMock(return_value=make_groups_result([]))
+    graph_client.me.transitive_member_of.graph_group.get = get_mock
+
+    with graph_ctx(MODULE, graph_client):
+        await list_my_groups(search='"displayName:Project"')
+
+    config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
+    assert config.query_parameters.search == '"displayName:Project"'
+    assert config.query_parameters.count is True
+    assert config.headers.get("ConsistencyLevel") == {"eventual"}
+
+
+async def test_search_and_filter_combined(graph_ctx):
+    # When both $filter and $search are provided, both should appear in the
+    # query parameters and the advanced query headers must still be present.
+    graph_client = MagicMock()
+    get_mock = AsyncMock(return_value=make_groups_result([]))
+    graph_client.me.transitive_member_of.graph_group.get = get_mock
+
+    with graph_ctx(MODULE, graph_client):
+        await list_my_groups(
+            filter="startsWith(displayName,'Eng')",
+            search='"displayName:Project"',
+        )
+
+    config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
+    assert config.query_parameters.filter == "startsWith(displayName,'Eng')"
+    assert config.query_parameters.search == '"displayName:Project"'
+    assert config.query_parameters.count is True
+    assert config.headers.get("ConsistencyLevel") == {"eventual"}

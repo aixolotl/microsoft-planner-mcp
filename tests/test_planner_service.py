@@ -1,4 +1,4 @@
-"""Unit tests for PlannerService — retry logic and ODataError handling."""
+"""Unit tests for PlannerService — make_config, with_retry, refresh_etag."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import pytest
 
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
-from msgraph.generated.models.planner_task_details import PlannerTaskDetails
 
 from src.services.planner_service import PlannerService
 
@@ -24,40 +23,8 @@ def make_task(etag: str = '"etag-v1"') -> PlannerTask:
     return task
 
 
-def make_details(etag: str = '"details-etag-v1"') -> PlannerTaskDetails:
-    details = PlannerTaskDetails()
-    details.additional_data = {"@odata.etag": etag}
-    return details
-
-
-def make_graph_client(
-    *,
-    patch_return: PlannerTask | None = None,
-    patch_side_effect: Exception | list | None = None,
-    delete_side_effect: Exception | list | None = None,
-    get_task: PlannerTask | None = None,
-    details_patch_return: PlannerTaskDetails | None = None,
-    details_patch_side_effect: Exception | list | None = None,
-    get_details: PlannerTaskDetails | None = None,
-) -> MagicMock:
-    client = MagicMock()
-
-    details_builder = MagicMock()
-    details_builder.patch = AsyncMock(return_value=details_patch_return, side_effect=details_patch_side_effect)
-    details_builder.get = AsyncMock(return_value=get_details)
-
-    item_builder = MagicMock()
-    item_builder.patch = AsyncMock(return_value=patch_return, side_effect=patch_side_effect)
-    item_builder.delete = AsyncMock(side_effect=delete_side_effect)
-    item_builder.get = AsyncMock(return_value=get_task)
-    item_builder.details = details_builder
-
-    client.planner.tasks.by_planner_task_id.return_value = item_builder
-    return client
-
-
 # ---------------------------------------------------------------------------
-# _make_config
+# make_config
 # ---------------------------------------------------------------------------
 
 
@@ -66,7 +33,7 @@ def make_graph_client(
     (False, set()),
 ], ids=["prefer-on", "prefer-off"])
 def test_make_config_headers(prefer, expect_prefer):
-    config = PlannerService(MagicMock())._make_config('"etag-abc"', prefer_representation=prefer)
+    config = PlannerService(MagicMock()).make_config('"etag-abc"', prefer_representation=prefer)
     assert config.headers.get("if-match") == {'"etag-abc"'}
     assert config.headers.get("prefer") == expect_prefer
 
@@ -74,240 +41,203 @@ def test_make_config_headers(prefer, expect_prefer):
 def test_configs_do_not_share_headers():
     """Guards against the SDK's shared mutable HeadersCollection default."""
     svc = PlannerService(MagicMock())
-    c1 = svc._make_config('"etag-1"')
-    c2 = svc._make_config('"etag-2"')
+    c1 = svc.make_config('"etag-1"')
+    c2 = svc.make_config('"etag-2"')
     assert c1.headers is not c2.headers
     assert c1.headers.get("if-match") == {'"etag-1"'}
     assert c2.headers.get("if-match") == {'"etag-2"'}
 
 
 # ---------------------------------------------------------------------------
-# patch_task
+# refresh_etag
 # ---------------------------------------------------------------------------
 
 
-async def test_patch_task_success():
-    updated = make_task('"etag-v2"')
-    client = make_graph_client(patch_return=updated)
+async def test_refresh_etag_returns_etag():
+    task = make_task('"etag-fresh"')
+    etag = await PlannerService.refresh_etag(AsyncMock(return_value=task), "task 'x'")
+    assert etag == '"etag-fresh"'
 
-    result = await PlannerService(client).patch_task("task-1", PlannerTask(), '"etag-v1"')
 
-    assert result is updated
-    client.planner.tasks.by_planner_task_id.assert_called_once_with("task-1")
-    client.planner.tasks.by_planner_task_id.return_value.patch.assert_awaited_once()
+async def test_refresh_etag_raises_when_none():
+    with pytest.raises(ValueError, match="No @odata.etag found on task 'x'"):
+        await PlannerService.refresh_etag(AsyncMock(return_value=None), "task 'x'")
+
+
+async def test_refresh_etag_raises_when_missing_key():
+    task = PlannerTask()
+    task.additional_data = {}
+    with pytest.raises(ValueError, match="No @odata.etag found"):
+        await PlannerService.refresh_etag(AsyncMock(return_value=task), "task 'x'")
+
+
+# ---------------------------------------------------------------------------
+# with_retry
+# ---------------------------------------------------------------------------
+
+
+async def test_with_retry_success():
+    """Operation succeeds on first attempt — no refresh needed."""
+    svc = PlannerService(MagicMock())
+    op = AsyncMock(return_value="ok")
+    refresh = AsyncMock()
+
+    result = await svc.with_retry('"etag-v1"', op, refresh)
+
+    assert result == "ok"
+    op.assert_awaited_once_with('"etag-v1"')
+    refresh.assert_not_awaited()
 
 
 @pytest.mark.parametrize("status", [412, 409], ids=["precondition-failed-412", "conflict-409"])
-async def test_patch_task_retries_on_conflict(status, make_odata_error):
-    fresh_task = make_task('"etag-fresh"')
-    updated_task = make_task('"etag-v3"')
-    client = make_graph_client(
-        patch_side_effect=[make_odata_error(status), updated_task],
-        get_task=fresh_task,
-    )
+async def test_with_retry_retries_on_conflict(status, make_odata_error):
+    """412/409 triggers a single refresh-and-retry."""
+    svc = PlannerService(MagicMock())
+    op = AsyncMock(side_effect=[make_odata_error(status), "ok"])
+    refresh = AsyncMock(return_value='"etag-fresh"')
 
-    result = await PlannerService(client).patch_task("task-1", PlannerTask(), '"etag-stale"')
+    result = await svc.with_retry('"etag-stale"', op, refresh)
 
-    assert result is updated_task
-    client.planner.tasks.by_planner_task_id.return_value.get.assert_awaited_once()
-    assert client.planner.tasks.by_planner_task_id.return_value.patch.await_count == 2
+    assert result == "ok"
+    assert op.await_count == 2
+    op.assert_awaited_with('"etag-fresh"')
+    refresh.assert_awaited_once()
 
 
-async def test_patch_task_retry_uses_fresh_etag(make_odata_error):
-    """Retry must send the refreshed ETag, not the original stale one."""
-    captured: list = []
+@pytest.mark.parametrize("status,code", [
+    (400, "BadRequest"),
+    (403, "Forbidden"),
+], ids=["bad-request-400", "forbidden-403"])
+async def test_with_retry_non_retryable_raises(status, code, make_odata_error):
+    """Non-409/412 errors are re-raised as RuntimeError with a clean message."""
+    svc = PlannerService(MagicMock())
+    op = AsyncMock(side_effect=make_odata_error(status, code))
+    refresh = AsyncMock()
 
-    async def capturing_patch(body, request_configuration=None):
-        captured.append(request_configuration)
-        if len(captured) == 1:
+    with pytest.raises(RuntimeError, match=f"Graph API error \\({status}\\)"):
+        await svc.with_retry('"etag-v1"', op, refresh)
+
+    refresh.assert_not_awaited()
+
+
+async def test_with_retry_sanitises_retry_failure(make_odata_error):
+    """If the retry itself fails, the ODataError is also sanitised."""
+    svc = PlannerService(MagicMock())
+    op = AsyncMock(side_effect=[make_odata_error(412), make_odata_error(500, "InternalServerError")])
+    refresh = AsyncMock(return_value='"etag-fresh"')
+
+    with pytest.raises(RuntimeError, match="Graph API error \\(500\\)"):
+        await svc.with_retry('"etag-stale"', op, refresh)
+
+
+# ---------------------------------------------------------------------------
+# clean_graph_error
+# ---------------------------------------------------------------------------
+
+
+def test_clean_graph_error_includes_status_and_message(make_odata_error):
+    exc = make_odata_error(404, "ResourceNotFound", "The requested item is not found.")
+    result = PlannerService.clean_graph_error(exc)
+
+    assert result == "Graph API error (404): The requested item is not found."
+
+
+def test_clean_graph_error_handles_missing_error_object():
+    exc = ODataError()
+    exc.response_status_code = 500
+    exc.error = None
+
+    result = PlannerService.clean_graph_error(exc)
+
+    assert result == "Graph API error (500): Unknown error"
+
+
+# ---------------------------------------------------------------------------
+# serialize_graph_object / serialize_graph_list
+# ---------------------------------------------------------------------------
+
+
+def test_serialize_graph_object_returns_dict():
+    """Verifies Kiota model → dict round-trip produces correct output."""
+    svc = PlannerService(MagicMock(), serialize=True)
+    task = PlannerTask()
+    task.id = "task-abc"
+    task.title = "Ship feature"
+    task.percent_complete = 50
+
+    result = svc.serialize_graph_object(task)
+
+    assert isinstance(result, dict)
+    assert result["id"] == "task-abc"
+    assert result["title"] == "Ship feature"
+    assert result["percentComplete"] == 50
+
+
+def test_serialize_graph_object_returns_raw_when_disabled():
+    """When serialize=False the original Kiota object is returned unchanged."""
+    svc = PlannerService(MagicMock(), serialize=False)
+    task = PlannerTask()
+    task.id = "task-abc"
+
+    result = svc.serialize_graph_object(task)
+
+    assert result is task
+
+
+def test_serialize_graph_list_returns_list_of_dicts():
+    svc = PlannerService(MagicMock(), serialize=True)
+    t1 = PlannerTask()
+    t1.id = "t1"
+    t1.title = "First"
+    t2 = PlannerTask()
+    t2.id = "t2"
+    t2.title = "Second"
+
+    result = svc.serialize_graph_list([t1, t2])
+
+    assert len(result) == 2
+    assert all(isinstance(r, dict) for r in result)
+    assert result[0]["id"] == "t1"
+    assert result[1]["title"] == "Second"
+
+
+def test_serialize_graph_list_returns_raw_when_disabled():
+    svc = PlannerService(MagicMock(), serialize=False)
+    tasks = [PlannerTask(), PlannerTask()]
+
+    result = svc.serialize_graph_list(tasks)
+
+    assert result is tasks
+
+
+async def test_with_retry_sends_fresh_etag_in_if_match_header(make_odata_error):
+    """Integration-style: verifies the If-Match header carries the refreshed ETag.
+
+    The generic with_retry tests only assert that ``op`` is called with the new
+    etag string. This test wires make_config into the operation lambda — the
+    same pattern used by the real tool code — and inspects the actual
+    RequestConfiguration header to confirm the refreshed ETag reaches the HTTP
+    layer. Without this, a bug in make_config could silently drop the header.
+    """
+    svc = PlannerService(MagicMock())
+    captured_configs: list = []
+
+    async def fake_patch(body, *, request_configuration):
+        captured_configs.append(request_configuration)
+        if len(captured_configs) == 1:
             raise make_odata_error(412)
-        return make_task('"etag-v3"')
+        return "patched"
 
-    client = MagicMock()
-    item = MagicMock()
-    item.patch = capturing_patch
-    item.get = AsyncMock(return_value=make_task('"etag-fresh"'))
-    client.planner.tasks.by_planner_task_id.return_value = item
-
-    await PlannerService(client).patch_task("task-1", PlannerTask(), '"etag-stale"')
-
-    assert list(captured[0].headers.get("if-match"))[0] == '"etag-stale"'
-    assert list(captured[1].headers.get("if-match"))[0] == '"etag-fresh"'
-
-
-@pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "MaximumTasksInProject")], ids=["bad-request-400", "maximum-tasks-in-project-403"])
-async def test_patch_task_non_retryable_raises(status, code, make_odata_error):
-    client = make_graph_client(patch_side_effect=make_odata_error(status, code))
-
-    with pytest.raises(ODataError) as exc_info:
-        await PlannerService(client).patch_task("task-1", PlannerTask(), '"etag-v1"')
-
-    assert exc_info.value.response_status_code == status
-    assert exc_info.value.error is not None
-    assert exc_info.value.error.code == code
-
-
-# ---------------------------------------------------------------------------
-# delete_task
-# ---------------------------------------------------------------------------
-
-
-async def test_delete_task_success():
-    client = make_graph_client()
-
-    await PlannerService(client).delete_task("task-1", '"etag-v1"')
-
-    client.planner.tasks.by_planner_task_id.return_value.delete.assert_awaited_once()
-
-
-@pytest.mark.parametrize("status", [412, 409], ids=["412", "409"])
-async def test_delete_task_retries_on_conflict(status, make_odata_error):
-    client = make_graph_client(
-        delete_side_effect=[make_odata_error(status), None],
-        get_task=make_task('"etag-fresh"'),
+    task = make_task('"etag-refreshed"')
+    result = await svc.with_retry(
+        '"etag-stale"',
+        lambda e: fake_patch(None, request_configuration=svc.make_config(e, prefer_representation=True)),
+        AsyncMock(return_value='"etag-refreshed"'),
     )
 
-    await PlannerService(client).delete_task("task-1", '"etag-stale"')
-
-    client.planner.tasks.by_planner_task_id.return_value.get.assert_awaited_once()
-    assert client.planner.tasks.by_planner_task_id.return_value.delete.await_count == 2
-
-
-async def test_delete_task_non_retryable_raises(make_odata_error):
-    client = make_graph_client(delete_side_effect=make_odata_error(403, "MaximumTasksInProject", "Over limit"))
-
-    with pytest.raises(ODataError) as exc_info:
-        await PlannerService(client).delete_task("task-1", '"etag-v1"')
-
-    assert exc_info.value.response_status_code == 403
-    assert exc_info.value.error is not None
-    assert exc_info.value.error.code == "MaximumTasksInProject"
-
-
-# ---------------------------------------------------------------------------
-# patch_task_details
-# ---------------------------------------------------------------------------
-
-
-async def test_patch_task_details_success():
-    updated = make_details('"details-etag-v2"')
-    client = make_graph_client(details_patch_return=updated)
-
-    result = await PlannerService(client).patch_task_details("task-1", PlannerTaskDetails(), '"details-etag-v1"')
-
-    assert result is updated
-    client.planner.tasks.by_planner_task_id.assert_called_once_with("task-1")
-    client.planner.tasks.by_planner_task_id.return_value.details.patch.assert_awaited_once()
-
-
-@pytest.mark.parametrize("status", [412, 409], ids=["precondition-failed-412", "conflict-409"])
-async def test_patch_task_details_retries_on_conflict(status, make_odata_error):
-    fresh = make_details('"details-etag-fresh"')
-    updated = make_details('"details-etag-v3"')
-    client = make_graph_client(
-        details_patch_side_effect=[make_odata_error(status), updated],
-        get_details=fresh,
-    )
-
-    result = await PlannerService(client).patch_task_details("task-1", PlannerTaskDetails(), '"details-etag-stale"')
-
-    assert result is updated
-    client.planner.tasks.by_planner_task_id.return_value.details.get.assert_awaited_once()
-    assert client.planner.tasks.by_planner_task_id.return_value.details.patch.await_count == 2
-
-
-async def test_patch_task_details_retry_uses_fresh_etag(make_odata_error):
-    captured: list = []
-
-    async def capturing_patch(body, request_configuration=None):
-        captured.append(request_configuration)
-        if len(captured) == 1:
-            raise make_odata_error(412)
-        return make_details('"details-etag-v3"')
-
-    client = MagicMock()
-    details = MagicMock()
-    details.patch = capturing_patch
-    details.get = AsyncMock(return_value=make_details('"details-etag-fresh"'))
-    item = MagicMock()
-    item.details = details
-    client.planner.tasks.by_planner_task_id.return_value = item
-
-    await PlannerService(client).patch_task_details("task-1", PlannerTaskDetails(), '"details-etag-stale"')
-
-    assert list(captured[0].headers.get("if-match"))[0] == '"details-etag-stale"'
-    assert list(captured[1].headers.get("if-match"))[0] == '"details-etag-fresh"'
-
-
-@pytest.mark.parametrize("status,code", [(400, "BadRequest"), (403, "Forbidden")], ids=["bad-request-400", "forbidden-403"])
-async def test_patch_task_details_non_retryable_raises(status, code, make_odata_error):
-    client = make_graph_client(details_patch_side_effect=make_odata_error(status, code))
-
-    with pytest.raises(ODataError) as exc_info:
-        await PlannerService(client).patch_task_details("task-1", PlannerTaskDetails(), '"details-etag-v1"')
-
-    assert exc_info.value.response_status_code == status
-    assert exc_info.value.error is not None
-    assert exc_info.value.error.code == code
-
-
-# ---------------------------------------------------------------------------
-# delete_plan / delete_bucket (shared retry logic)
-# ---------------------------------------------------------------------------
-
-
-def make_plan_client(*, delete_side_effect: Exception | list | None = None) -> tuple[MagicMock, MagicMock]:
-    from msgraph.generated.models.planner_plan import PlannerPlan
-    plan = PlannerPlan()
-    plan.additional_data = {"@odata.etag": '"plan-etag-fresh"'}
-    item = MagicMock()
-    item.delete = AsyncMock(side_effect=delete_side_effect)
-    item.get = AsyncMock(return_value=plan)
-    client = MagicMock()
-    client.planner.plans.by_planner_plan_id.return_value = item
-    return client, item
-
-
-def make_bucket_client(*, delete_side_effect: Exception | list | None = None) -> tuple[MagicMock, MagicMock]:
-    from msgraph.generated.models.planner_bucket import PlannerBucket
-    bucket = PlannerBucket()
-    bucket.additional_data = {"@odata.etag": '"bucket-etag-fresh"'}
-    item = MagicMock()
-    item.delete = AsyncMock(side_effect=delete_side_effect)
-    item.get = AsyncMock(return_value=bucket)
-    client = MagicMock()
-    client.planner.buckets.by_planner_bucket_id.return_value = item
-    return client, item
-
-
-@pytest.mark.parametrize("factory,svc_method", [
-    (make_plan_client, "delete_plan"),
-    (make_bucket_client, "delete_bucket"),
-], ids=["plan", "bucket"])
-async def test_delete_resource_success(factory, svc_method):
-    client, item = factory()
-    await getattr(PlannerService(client), svc_method)("res-1", '"etag-v1"')
-    item.delete.assert_awaited_once()
-
-
-@pytest.mark.parametrize("factory,svc_method", [
-    (make_plan_client, "delete_plan"),
-    (make_bucket_client, "delete_bucket"),
-], ids=["plan", "bucket"])
-@pytest.mark.parametrize("status", [412, 409], ids=["412", "409"])
-async def test_delete_resource_retries_on_conflict(factory, svc_method, status, make_odata_error):
-    client, item = factory(delete_side_effect=[make_odata_error(status), None])
-    await getattr(PlannerService(client), svc_method)("res-1", '"etag-stale"')
-    item.get.assert_awaited_once()
-    assert item.delete.await_count == 2
-
-
-@pytest.mark.parametrize("factory,svc_method", [
-    (make_plan_client, "delete_plan"),
-    (make_bucket_client, "delete_bucket"),
-], ids=["plan", "bucket"])
-async def test_delete_resource_non_retryable_raises(factory, svc_method, make_odata_error):
-    client, _ = factory(delete_side_effect=make_odata_error(403, "Forbidden", "No access"))
-    with pytest.raises(ODataError) as exc_info:
-        await getattr(PlannerService(client), svc_method)("res-1", '"etag-v1"')
-    assert exc_info.value.response_status_code == 403
+    assert result == "patched"
+    assert len(captured_configs) == 2
+    # First attempt uses the stale etag
+    assert captured_configs[0].headers.get("if-match") == {'"etag-stale"'}
+    # Retry attempt uses the refreshed etag
+    assert captured_configs[1].headers.get("if-match") == {'"etag-refreshed"'}

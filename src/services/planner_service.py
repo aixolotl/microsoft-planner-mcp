@@ -14,16 +14,16 @@ is raised from _refresh_task_etag.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from kiota_abstractions.headers_collection import HeadersCollection
+from kiota_serialization_json.json_serialization_writer import JsonSerializationWriter
 from msgraph import GraphServiceClient
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
-from msgraph.generated.models.planner_task import PlannerTask
-from msgraph.generated.models.planner_task_details import PlannerTaskDetails
 from msgraph_core.tasks.page_iterator import PageIterator
 
 from ..types import CollectionRequestBuilder
@@ -34,11 +34,50 @@ T = TypeVar("T")
 class PlannerService:
     """Planner operations over a caller-supplied GraphServiceClient."""
 
-    def __init__(self, client: GraphServiceClient) -> None:
+    def __init__(self, client: GraphServiceClient, *, serialize: bool = True) -> None:
         self._client = client
+        # When True, return values from tools are converted from Kiota Parsable
+        # objects to plain dicts via JSON round-trip. Without serialization,
+        # FastMCP's default serializer produces incomplete or opaque output
+        # because it does not understand Kiota models.
+        # Docs: https://learn.microsoft.com/en-us/openapi/kiota/serialization
+        self.serialize = serialize
 
     # ------------------------------------------------------------------
-    # Internal helpers
+    # Serialization helpers
+    # ------------------------------------------------------------------
+
+    def serialize_graph_object(self, obj: Any) -> Any:
+        """Convert a Kiota Parsable object to a plain dict via JSON round-trip.
+
+        Kiota model objects (PlannerTask, Group, User, etc.) implement
+        Parsable.serialize() which writes fields into a SerializationWriter.
+        Using JsonSerializationWriter produces a UTF-8 JSON byte string that
+        we decode and parse into a native dict. Without this, returning a raw
+        Kiota object from an MCP tool can produce incomplete or opaque output
+        because FastMCP's default serializer does not understand Kiota models.
+
+        When self.serialize is False the original object is returned unchanged —
+        useful for internal callers that need the typed SDK object.
+        """
+        if not self.serialize:
+            return obj
+        writer = JsonSerializationWriter()
+        obj.serialize(writer)
+        return json.loads(writer.get_serialized_content().decode("utf-8"))
+
+    def serialize_graph_list(self, items: list[Any]) -> list[Any]:
+        """Convert a list of Kiota Parsable objects to a list of plain dicts.
+
+        Each item is serialized independently via serialize_graph_object. When
+        self.serialize is False the original list is returned unchanged.
+        """
+        if not self.serialize:
+            return items
+        return [self.serialize_graph_object(item) for item in items]
+
+    # ------------------------------------------------------------------
+    # Request helpers
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -75,7 +114,7 @@ class PlannerService:
         return dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
 
     @staticmethod
-    def _make_config(etag: str, *, prefer_representation: bool = False) -> RequestConfiguration:
+    def make_config(etag: str, *, prefer_representation: bool = False) -> RequestConfiguration:
         """Build a RequestConfiguration with If-Match and optionally Prefer: return=representation.
 
         HeadersCollection must be passed explicitly — RequestConfiguration uses
@@ -97,39 +136,26 @@ class PlannerService:
             headers.add("Prefer", "return=representation")
         return RequestConfiguration(headers=headers)
 
-    async def _refresh_task_etag(self, task_id: str) -> str:
-        """GET the task and return the current @odata.etag value."""
-        task = await self._client.planner.tasks.by_planner_task_id(task_id).get()
-        etag: str | None = task.additional_data.get("@odata.etag") if task else None
+    @staticmethod
+    async def refresh_etag(get_fn: Callable[[], Awaitable[Any]], label: str) -> str:
+        """GET a resource and return its current @odata.etag value.
+
+        Consolidates the per-resource refresh helpers into a single function.
+        Without a current ETag, Graph rejects PATCH/DELETE with 428 Precondition
+        Required. The label is used only in the ValueError message on failure.
+
+        Accepts a zero-arg callable that returns an awaitable (e.g. ``item.get``)
+        rather than a pre-built coroutine. This ensures a fresh coroutine is
+        created on each invocation — awaiting the same coroutine twice raises
+        ``RuntimeError: cannot reuse already awaited coroutine``.
+        """
+        obj = await get_fn()
+        etag: str | None = obj.additional_data.get("@odata.etag") if obj else None
         if not etag:
-            raise ValueError(f"No @odata.etag found on task {task_id!r}")
+            raise ValueError(f"No @odata.etag found on {label}")
         return etag
 
-    async def _refresh_details_etag(self, task_id: str) -> str:
-        """GET the task details and return the current @odata.etag value."""
-        details = await self._client.planner.tasks.by_planner_task_id(task_id).details.get()
-        etag: str | None = details.additional_data.get("@odata.etag") if details else None
-        if not etag:
-            raise ValueError(f"No @odata.etag found on task details {task_id!r}")
-        return etag
-
-    async def _refresh_plan_etag(self, plan_id: str) -> str:
-        """GET the plan and return the current @odata.etag value."""
-        plan = await self._client.planner.plans.by_planner_plan_id(plan_id).get()
-        etag: str | None = plan.additional_data.get("@odata.etag") if plan else None
-        if not etag:
-            raise ValueError(f"No @odata.etag found on plan {plan_id!r}")
-        return etag
-
-    async def _refresh_bucket_etag(self, bucket_id: str) -> str:
-        """GET the bucket and return the current @odata.etag value."""
-        bucket = await self._client.planner.buckets.by_planner_bucket_id(bucket_id).get()
-        etag: str | None = bucket.additional_data.get("@odata.etag") if bucket else None
-        if not etag:
-            raise ValueError(f"No @odata.etag found on bucket {bucket_id!r}")
-        return etag
-
-    async def _with_retry(self, etag: str, operation: Callable[[str], Awaitable[T]], refresh: Callable[[], Awaitable[str]]) -> T:
+    async def with_retry(self, etag: str, operation: Callable[[str], Awaitable[T]], refresh: Callable[[], Awaitable[str]]) -> T:
         """Run ``operation(etag)``, retrying once with a fresh ETag on 412/409."""
         try:
             return await operation(etag)
@@ -143,64 +169,22 @@ class PlannerService:
             # conflict is indistinguishable from a persistent server error.
             # Docs: https://learn.microsoft.com/en-us/graph/api/plannertask-update#request-headers
             if exc.response_status_code not in (409, 412):
-                raise
-            return await operation(await refresh())
+                raise RuntimeError(self.clean_graph_error(exc)) from None
+            try:
+                return await operation(await refresh())
+            except ODataError as retry_exc:
+                raise RuntimeError(self.clean_graph_error(retry_exc)) from None
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    @staticmethod
+    def clean_graph_error(exc: ODataError) -> str:
+        """Format a Graph API error as a user-safe string without internal IDs.
 
-    async def patch_task(
-        self,
-        task_id: str,
-        body: PlannerTask,
-        etag: str,
-    ) -> PlannerTask | None:
-        """PATCH a task.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.tasks.by_planner_task_id(task_id)
-        return await self._with_retry(
-            etag,
-            lambda e: item.patch(body, request_configuration=self._make_config(e, prefer_representation=True)),
-            lambda: self._refresh_task_etag(task_id),
-        )
-
-    async def delete_task(self, task_id: str, etag: str) -> None:
-        """DELETE a task.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.tasks.by_planner_task_id(task_id)
-        await self._with_retry(
-            etag,
-            lambda e: item.delete(request_configuration=self._make_config(e)),
-            lambda: self._refresh_task_etag(task_id),
-        )
-
-    async def patch_task_details(
-        self,
-        task_id: str,
-        body: PlannerTaskDetails,
-        etag: str,
-    ) -> PlannerTaskDetails | None:
-        """PATCH task details.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.tasks.by_planner_task_id(task_id).details
-        return await self._with_retry(
-            etag,
-            lambda e: item.patch(body, request_configuration=self._make_config(e, prefer_representation=True)),
-            lambda: self._refresh_details_etag(task_id),
-        )
-
-    async def delete_plan(self, plan_id: str, etag: str) -> None:
-        """DELETE a plan.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.plans.by_planner_plan_id(plan_id)
-        await self._with_retry(
-            etag,
-            lambda e: item.delete(request_configuration=self._make_config(e)),
-            lambda: self._refresh_plan_etag(plan_id),
-        )
-
-    async def delete_bucket(self, bucket_id: str, etag: str) -> None:
-        """DELETE a bucket.  Retries once with a fresh ETag on 412/409."""
-        item = self._client.planner.buckets.by_planner_bucket_id(bucket_id)
-        await self._with_retry(
-            etag,
-            lambda e: item.delete(request_configuration=self._make_config(e)),
-            lambda: self._refresh_bucket_etag(bucket_id),
-        )
+        ODataError.__str__() includes client_request_id, datetime, and InnerError
+        objects that leak server internals. This helper extracts only the HTTP
+        status and user-facing message so callers can re-raise a clean exception.
+        Without this, mask_error_details=True on FastMCP still exposes the raw
+        repr because it masks tracebacks, not exception messages.
+        """
+        status = exc.response_status_code or "unknown"
+        msg = (exc.error.message if exc.error else None) or "Unknown error"
+        return f"Graph API error ({status}): {msg}"
