@@ -61,14 +61,17 @@ async def list_my_plans(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        all_plans = await PlannerService.paginate(
-            graph_client.me.planner.plans,
-            RequestConfiguration(
-                query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
-                    select=select_fields
-                )
-            ),
-        )
+        try:
+            all_plans = await PlannerService.paginate(
+                graph_client.me.planner.plans,
+                RequestConfiguration(
+                    query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
+                        select=select_fields
+                    )
+                ),
+            )
+        except ODataError as exc:
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
     if ctx is not None:
         await ctx.info(f"Found {len(all_plans)} plan(s)")
@@ -129,7 +132,7 @@ async def list_group_plans(
             # stack trace. All other status codes (e.g. 404, 500) are re-raised
             # as-is so genuine failures are not silently swallowed.
             if exc.response_status_code != 403:
-                raise
+                raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
             code = exc.error.code if exc.error else None
             msg = exc.error.message if exc.error else exc.primary_message
             raise ValueError(f"Access denied for group {group_id!r} ({code}): {msg}") from exc
@@ -171,11 +174,11 @@ async def create_plan(
             # the group does not have a licence for Planner. Convert to a clear
             # ValueError so the LLM receives a readable explanation instead of a
             # raw ODataError stack trace.
-            if exc.response_status_code != 403:
-                raise
-            code = exc.error.code if exc.error else None
-            msg = exc.error.message if exc.error else exc.primary_message
-            raise ValueError(f"Cannot create plan ({code}): {msg}") from exc
+            if exc.response_status_code == 403:
+                code = exc.error.code if exc.error else None
+                msg = exc.error.message if exc.error else exc.primary_message
+                raise ValueError(f"Cannot create plan ({code}): {msg}") from exc
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
         if result is None:
             return None
@@ -222,7 +225,7 @@ async def create_plan(
 async def delete_plan(
     plan_id: Annotated[str, "The ID of the plan to delete (from list_my_plans or list_group_plans)."],
     etag: Annotated[str, "The current @odata.etag of the plan. Retries once automatically if stale (412/409)."],
-) -> None:
+) -> str:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -235,3 +238,4 @@ async def delete_plan(
             lambda e: item.delete(request_configuration=svc.make_config(e)),
             lambda: svc.refresh_etag(item.get, f"plan {plan_id!r}"),
         )
+    return f"Deleted plan {plan_id!r}."

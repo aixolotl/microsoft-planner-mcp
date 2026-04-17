@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastmcp.exceptions import AuthorizationError
-from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_plan import PlannerPlan
 from msgraph.generated.models.user import User
 
@@ -203,10 +202,8 @@ async def test_list_group_plans_non_403_odata_error_reraises(graph_ctx, make_oda
     )
 
     with graph_ctx(MODULE, graph_client):
-        with pytest.raises(ODataError) as exc_info:
+        with pytest.raises(RuntimeError, match="Graph API error \\(404\\)"):
             await list_group_plans("group-1")
-
-    assert exc_info.value.response_status_code == 404
 
 
 async def test_list_group_plans_forwards_obo_token(token_capturing_ctx):
@@ -257,7 +254,7 @@ async def test_create_plan_posts_correct_body(graph_ctx):
 
 @pytest.mark.parametrize("status,code,exc_type", [
     (403, "AuthorizationRequestDenied", ValueError),
-    (400, "BadRequest", ODataError),
+    (400, "BadRequest", RuntimeError),
 ], ids=["403-value-error", "400-reraises"])
 async def test_create_plan_odata_error(status, code, exc_type, graph_ctx, make_odata_error):
     graph_client = MagicMock()
@@ -270,7 +267,7 @@ async def test_create_plan_odata_error(status, code, exc_type, graph_ctx, make_o
     if exc_type is ValueError:
         assert "Cannot create plan" in str(exc_info.value)
     else:
-        assert exc_info.value.response_status_code == status
+        assert "Graph API error" in str(exc_info.value)
 
 
 async def test_create_plan_forwards_obo_token(token_capturing_ctx):
@@ -331,7 +328,7 @@ async def test_delete_plan_calls_sdk(graph_ctx):
     graph_client.planner.plans.by_planner_plan_id.return_value.delete = AsyncMock()
 
     with graph_ctx(MODULE, graph_client):
-        await delete_plan("plan-1", '"etag-v1"')
+        result = await delete_plan("plan-1", '"etag-v1"')
 
     graph_client.planner.plans.by_planner_plan_id.assert_called_once_with("plan-1")
     delete_mock = graph_client.planner.plans.by_planner_plan_id.return_value.delete
@@ -339,6 +336,8 @@ async def test_delete_plan_calls_sdk(graph_ctx):
     # Verify the ETag reaches the If-Match header on the request configuration.
     config = delete_mock.call_args.kwargs["request_configuration"]
     assert config.headers.get("if-match") == {'"etag-v1"'}
+
+    assert result == "Deleted plan 'plan-1'."
 
 
 async def test_delete_plan_forwards_obo_token(token_capturing_ctx):

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastmcp import FastMCP
 from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
+from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.user import User
 
 from ..deps import get_optional_context
@@ -39,6 +40,9 @@ async def get_me() -> dict | None:
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        result = await graph_client.me.get()
+        try:
+            result = await graph_client.me.get()
+        except ODataError as exc:
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
     return svc.serialize_graph_object(result) if result else None

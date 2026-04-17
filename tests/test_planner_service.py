@@ -109,16 +109,47 @@ async def test_with_retry_retries_on_conflict(status, make_odata_error):
     (403, "Forbidden"),
 ], ids=["bad-request-400", "forbidden-403"])
 async def test_with_retry_non_retryable_raises(status, code, make_odata_error):
-    """Non-409/412 errors are re-raised immediately."""
+    """Non-409/412 errors are re-raised as RuntimeError with a clean message."""
     svc = PlannerService(MagicMock())
     op = AsyncMock(side_effect=make_odata_error(status, code))
     refresh = AsyncMock()
 
-    with pytest.raises(ODataError) as exc_info:
+    with pytest.raises(RuntimeError, match=f"Graph API error \\({status}\\)"):
         await svc.with_retry('"etag-v1"', op, refresh)
 
-    assert exc_info.value.response_status_code == status
     refresh.assert_not_awaited()
+
+
+async def test_with_retry_sanitises_retry_failure(make_odata_error):
+    """If the retry itself fails, the ODataError is also sanitised."""
+    svc = PlannerService(MagicMock())
+    op = AsyncMock(side_effect=[make_odata_error(412), make_odata_error(500, "InternalServerError")])
+    refresh = AsyncMock(return_value='"etag-fresh"')
+
+    with pytest.raises(RuntimeError, match="Graph API error \\(500\\)"):
+        await svc.with_retry('"etag-stale"', op, refresh)
+
+
+# ---------------------------------------------------------------------------
+# clean_graph_error
+# ---------------------------------------------------------------------------
+
+
+def test_clean_graph_error_includes_status_and_message(make_odata_error):
+    exc = make_odata_error(404, "ResourceNotFound", "The requested item is not found.")
+    result = PlannerService.clean_graph_error(exc)
+
+    assert result == "Graph API error (404): The requested item is not found."
+
+
+def test_clean_graph_error_handles_missing_error_object():
+    exc = ODataError()
+    exc.response_status_code = 500
+    exc.error = None
+
+    result = PlannerService.clean_graph_error(exc)
+
+    assert result == "Graph API error (500): Unknown error"
 
 
 # ---------------------------------------------------------------------------

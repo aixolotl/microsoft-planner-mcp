@@ -69,14 +69,17 @@ async def list_my_tasks(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        tasks = await PlannerService.paginate(
-            graph_client.me.planner.tasks,
-            RequestConfiguration(
-                query_parameters=TasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
-                    select=select_fields
-                )
-            ),
-        )
+        try:
+            tasks = await PlannerService.paginate(
+                graph_client.me.planner.tasks,
+                RequestConfiguration(
+                    query_parameters=TasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
+                        select=select_fields
+                    )
+                ),
+            )
+        except ODataError as exc:
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
     if ctx is not None:
         await ctx.info(f"Found {len(tasks)} task(s) assigned to you")
@@ -116,14 +119,17 @@ async def list_tasks(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        tasks = await PlannerService.paginate(
-            graph_client.planner.plans.by_planner_plan_id(plan_id).tasks,
-            RequestConfiguration(
-                query_parameters=PlanTasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
-                    select=select_fields
-                )
-            ),
-        )
+        try:
+            tasks = await PlannerService.paginate(
+                graph_client.planner.plans.by_planner_plan_id(plan_id).tasks,
+                RequestConfiguration(
+                    query_parameters=PlanTasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
+                        select=select_fields
+                    )
+                ),
+            )
+        except ODataError as exc:
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
     if ctx is not None:
         await ctx.info(f"Found {len(tasks)} task(s) in plan {plan_id}")
@@ -190,11 +196,11 @@ async def create_task(
             # task limit or lacks write permission. Convert to ValueError with a
             # readable message so the LLM gets a clear explanation. All other
             # status codes are re-raised so genuine failures surface normally.
-            if exc.response_status_code != 403:
-                raise
-            code = exc.error.code if exc.error else None
-            msg = exc.error.message if exc.error else exc.primary_message
-            raise ValueError(f"Cannot create task ({code}): {msg}") from exc
+            if exc.response_status_code == 403:
+                code = exc.error.code if exc.error else None
+                msg = exc.error.message if exc.error else exc.primary_message
+                raise ValueError(f"Cannot create task ({code}): {msg}") from exc
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
 
 # readOnlyHint=True: this tool reads task details without any side effects.
@@ -219,8 +225,11 @@ async def get_task_details(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        result = await graph_client.planner.tasks.by_planner_task_id(task_id).details.get()
-    
+        try:
+            result = await graph_client.planner.tasks.by_planner_task_id(task_id).details.get()
+        except ODataError as exc:
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
+
     return svc.serialize_graph_object(result) if result else None
 
 
@@ -342,19 +351,12 @@ async def update_task_details(
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
         item = graph_client.planner.tasks.by_planner_task_id(task_id).details
-        try:
-            result = await svc.with_retry(
-                etag,
-                lambda e: item.patch(body, request_configuration=svc.make_config(e, prefer_representation=True)),
-                lambda: svc.refresh_etag(item.get, f"task details {task_id!r}"),
-            )
-            return svc.serialize_graph_object(result) if result else None
-        except ODataError as exc:
-            if exc.response_status_code == 403:
-                code = exc.error.code if exc.error else None
-                msg = exc.error.message if exc.error else exc.primary_message
-                raise ValueError(f"Cannot update task details ({code}): {msg}") from exc
-            raise
+        result = await svc.with_retry(
+            etag,
+            lambda e: item.patch(body, request_configuration=svc.make_config(e, prefer_representation=True)),
+            lambda: svc.refresh_etag(item.get, f"task details {task_id!r}"),
+        )
+        return svc.serialize_graph_object(result) if result else None
 
 
 @tasks_router.tool(
@@ -366,7 +368,7 @@ async def update_task_details(
 async def delete_task(
     task_id: Annotated[str, "The ID of the task to delete."],
     etag: Annotated[str, "The current @odata.etag of the task. Retries once automatically if stale (412/409)."],
-) -> None:
+) -> str:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
@@ -379,3 +381,4 @@ async def delete_task(
             lambda e: item.delete(request_configuration=svc.make_config(e)),
             lambda: svc.refresh_etag(item.get, f"task {task_id!r}"),
         )
+    return f"Deleted task {task_id!r}."

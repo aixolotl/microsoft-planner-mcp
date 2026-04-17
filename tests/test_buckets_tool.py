@@ -7,7 +7,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from fastmcp.exceptions import AuthorizationError
-from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_bucket import PlannerBucket
 
 from src.tools.buckets import create_bucket, delete_bucket, list_buckets
@@ -143,7 +142,7 @@ async def test_create_bucket_posts_correct_body(graph_ctx):
 
 @pytest.mark.parametrize("status,code,exc_type", [
     (403, "AuthorizationRequestDenied", ValueError),
-    (400, "BadRequest", ODataError),
+    (400, "BadRequest", RuntimeError),
 ], ids=["403-value-error", "400-reraises"])
 async def test_create_bucket_odata_error(status, code, exc_type, graph_ctx, make_odata_error):
     graph_client = MagicMock()
@@ -156,7 +155,7 @@ async def test_create_bucket_odata_error(status, code, exc_type, graph_ctx, make
     if exc_type is ValueError:
         assert "Cannot create bucket" in str(exc_info.value)
     else:
-        assert exc_info.value.response_status_code == status
+        assert "Graph API error" in str(exc_info.value)
 
 
 async def test_create_bucket_forwards_obo_token(token_capturing_ctx):
@@ -179,7 +178,7 @@ async def test_delete_bucket_calls_sdk(graph_ctx):
     graph_client.planner.buckets.by_planner_bucket_id.return_value.delete = AsyncMock()
 
     with graph_ctx(MODULE, graph_client):
-        await delete_bucket("bucket-1", '"etag-v1"')
+        result = await delete_bucket("bucket-1", '"etag-v1"')
 
     graph_client.planner.buckets.by_planner_bucket_id.assert_called_once_with("bucket-1")
     delete_mock = graph_client.planner.buckets.by_planner_bucket_id.return_value.delete
@@ -187,6 +186,8 @@ async def test_delete_bucket_calls_sdk(graph_ctx):
     # Verify the ETag reaches the If-Match header on the request configuration.
     config = delete_mock.call_args.kwargs["request_configuration"]
     assert config.headers.get("if-match") == {'"etag-v1"'}
+
+    assert result == "Deleted bucket 'bucket-1'."
 
 
 async def test_delete_bucket_forwards_obo_token(token_capturing_ctx):

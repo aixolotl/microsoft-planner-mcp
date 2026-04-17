@@ -8,6 +8,7 @@ from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from kiota_abstractions.headers_collection import HeadersCollection
 from msgraph.generated.models.group import Group
+from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.users.item.transitive_member_of.graph_group.graph_group_request_builder import GraphGroupRequestBuilder
 
 from ..deps import get_optional_context
@@ -79,10 +80,13 @@ async def list_my_groups(
         if filter:
             config.headers = HeadersCollection()
             config.headers.try_add("ConsistencyLevel", "eventual")
-        groups = await PlannerService.paginate(
-            graph_client.me.transitive_member_of.graph_group,
-            config,
-        )
+        try:
+            groups = await PlannerService.paginate(
+                graph_client.me.transitive_member_of.graph_group,
+                config,
+            )
+        except ODataError as exc:
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
     if ctx is not None:
         await ctx.debug(f"Found {len(groups)} group(s)")
