@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pydantic import Field
 from typing import Annotated
 
 from fastmcp import FastMCP
@@ -20,18 +21,23 @@ groups_router = FastMCP("groups")
 
 @groups_router.tool(
     name="list_my_groups",
-    description="List all Microsoft 365 groups the authenticated user is a member of.",
+    description="List all Microsoft 365 groups the authenticated user is a member of. Note: with default permissions, displayName and other properties are not returned, but they can be used in filter and search.",
     tags={"groups", "read"},
     annotations={"readOnlyHint": True},
 )
 async def list_my_groups(
-    select: Annotated[str | None, "Comma-separated list of Group fields to include. Pass '*all' for all fields."] = "id,displayName,mail",
-    filter: Annotated[str | None, "OData filter string, e.g. \"startsWith(displayName,'Project')\"."] = None,
-    # NOTE: An `expand` parameter was previously exposed here but has been
-    # intentionally removed. The /me/transitiveMemberOf/microsoft.graph.group
-    # endpoint does not support $expand — Graph returns a 400 BadRequest when
-    # it is included. If group expansion is needed in future, use a separate
-    # per-group GET with $expand instead.
+    select: Annotated[
+        str | None, 
+        Field(description="Optional comma-separated list of Group fields to include. Pass '*all' for all fields.", 
+              default="id,displayName,mail")] = "id,displayName,mail",
+    filter: Annotated[
+        str | None, 
+        Field(description="OData filter string, e.g. \"startsWith(displayName,'Project')\".",
+              examples=["startsWith(displayName,'Project')", "displayName eq 'Project X'"])] = None,
+    search: Annotated[
+        str | None,
+        Field(description="OData search string to perform free-text search across multiple fields. e.g. \"displayName:Project\" for searching group name containing 'Project'.",
+              examples=["\"displayName:Project\"", "\"description:Something else\""])] = None,
 ) -> list[dict] | None:
     token = get_access_token()
     if token is None:
@@ -69,7 +75,9 @@ async def list_my_groups(
             query_parameters=GraphGroupRequestBuilder.GraphGroupRequestBuilderGetQueryParameters(
                 select=select_fields,
                 filter=filter,
-                count=True if filter else None,
+                search=search,
+                count=True if filter or search else None,
+                expand=expand,
             ),
         )
         # $filter on /me/transitiveMemberOf/microsoft.graph.group is an
@@ -77,7 +85,7 @@ async def list_my_groups(
         # $count=true or it returns 400 Request_UnsupportedQuery. Without
         # these headers, every filter value is rejected.
         # Docs: https://learn.microsoft.com/en-us/graph/aad-advanced-queries
-        if filter:
+        if filter or search:
             config.headers = HeadersCollection()
             config.headers.try_add("ConsistencyLevel", "eventual")
         try:
