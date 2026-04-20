@@ -289,6 +289,12 @@ class PlannerService:
             # Strip surrounding quotes if present — LLM callers often pass
             # search terms quoted (e.g. ``"Project"``).
             term = search.strip().strip('"').strip("'").lower()
+            # Treat an empty normalized term as "no search". Without this,
+            # `'' in <field>` matches every item and turns quoted-empty input
+            # into an accidental match-all filter.
+            # Docs: https://docs.python.org/3/reference/expressions.html#membership-test-operations
+            if not term:
+                return result
             fields = search_fields or ["title"]
             result = [
                 item for item in result
