@@ -233,13 +233,23 @@ class PlannerService:
         if op in ("gt", "ge", "lt", "le"):
             if left is None or right is None:
                 return False
-            if op == "gt":
-                return left > right
-            if op == "ge":
-                return left >= right
-            if op == "lt":
-                return left < right
-            return left <= right
+            try:
+                if op == "gt":
+                    return left > right
+                if op == "ge":
+                    return left >= right
+                if op == "lt":
+                    return left < right
+                return left <= right
+            except TypeError as exc:
+                # Convert Python's mixed-type comparison failure into the
+                # ValueError contract exposed by filter_items(). Without this,
+                # incompatible filters like "title gt 1" leak TypeError to callers.
+                # Docs: https://docs.python.org/3/reference/expressions.html#value-comparisons
+                raise ValueError(
+                    "Incompatible types for filter comparison "
+                    f"{op!r}: {type(left).__name__} and {type(right).__name__}."
+                ) from exc
 
         raise ValueError(
             f"Unsupported filter operator: {op!r}. "
