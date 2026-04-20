@@ -49,7 +49,7 @@ async def list_my_tasks(
             description=(
                 "OData filter expression. "
                 "Supported operators: eq, ne, gt, ge, lt, le, and, or, not. "
-                "Supported functions: startswith, endswith, contains."
+                "Supported functions: startswith, endswith, contains. "
                 "Example to get all incomplete tasks: \"percentComplete ne 100\"."
             ),
             examples=["startswith(title, 'Project')", "title eq 'Project X'", "percentComplete ne 100", "startswith(title, 'Project') and percentComplete eq 0"],
