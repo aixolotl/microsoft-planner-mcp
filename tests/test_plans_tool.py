@@ -10,7 +10,7 @@ from fastmcp.exceptions import AuthorizationError
 from msgraph.generated.models.planner_plan import PlannerPlan
 from msgraph.generated.models.user import User
 
-from src.tools.plans import create_plan, delete_plan, list_group_plans, list_my_plans
+from src.tools.plans import create_plan, delete_plan, get_plan_categories, list_group_plans, list_my_plans
 
 MODULE = "src.tools.plans"
 # MODULE is the import path patched by graph_ctx / token_capturing_ctx.
@@ -348,3 +348,117 @@ async def test_delete_plan_forwards_obo_token(token_capturing_ctx):
         await delete_plan("plan-1", '"etag-v1"')
 
     assert received == ["my-obo"]
+
+
+# ---------------------------------------------------------------------------
+# Tests: get_plan_categories
+# ---------------------------------------------------------------------------
+
+
+def make_category_descriptions(overrides: dict | None = None):
+    """Build a mock PlannerCategoryDescriptions with optional custom labels."""
+    from msgraph.generated.models.planner_category_descriptions import PlannerCategoryDescriptions
+    obj = PlannerCategoryDescriptions()
+    for i in range(1, 26):
+        setattr(obj, f"category{i}", None)
+    if overrides:
+        for key, label in overrides.items():
+            setattr(obj, key, label)
+    return obj
+
+
+def make_plan_details_obj(category_descriptions=None):
+    """Build a mock PlannerPlanDetails with the given category_descriptions."""
+    from msgraph.generated.models.planner_plan_details import PlannerPlanDetails
+    details = PlannerPlanDetails()
+    details.category_descriptions = category_descriptions
+    return details
+
+
+async def test_get_plan_categories_no_token_raises():
+    with patch(f"{MODULE}.get_access_token", return_value=None):
+        with pytest.raises(AuthorizationError):
+            await get_plan_categories("plan-1")
+
+
+async def test_get_plan_categories_returns_all_25_slots(graph_ctx):
+    # All 25 category slots must be present regardless of how many have labels.
+    # Integration tools rely on a predictable list length for slot indexing.
+    details = make_plan_details_obj(make_category_descriptions())
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.details.get = AsyncMock(return_value=details)
+
+    with graph_ctx(MODULE, graph_client):
+        result = await get_plan_categories("plan-1")
+
+    assert result is not None
+    assert len(result) == 25
+    keys = [item["key"] for item in result]
+    assert "category1" in keys
+    assert "category25" in keys
+
+
+async def test_get_plan_categories_includes_display_names(graph_ctx):
+    descriptions = make_category_descriptions({"category3": "Urgent", "category14": "Blocked"})
+    details = make_plan_details_obj(descriptions)
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.details.get = AsyncMock(return_value=details)
+
+    with graph_ctx(MODULE, graph_client):
+        result = await get_plan_categories("plan-1")
+
+    cat3 = next(c for c in result if c["key"] == "category3")
+    cat14 = next(c for c in result if c["key"] == "category14")
+    cat1 = next(c for c in result if c["key"] == "category1")
+
+    assert cat3["display_name"] == "Urgent"
+    assert cat14["display_name"] == "Blocked"
+    assert cat1["display_name"] is None
+
+
+@pytest.mark.parametrize("details_return", [None, make_plan_details_obj(None)], ids=["details-none", "category-descriptions-none"])
+async def test_get_plan_categories_returns_none_when_no_details(details_return, graph_ctx):
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.details.get = AsyncMock(return_value=details_return)
+
+    with graph_ctx(MODULE, graph_client):
+        result = await get_plan_categories("plan-1")
+
+    assert result is None
+
+
+async def test_get_plan_categories_forwards_obo_token(token_capturing_ctx):
+    details = make_plan_details_obj(make_category_descriptions())
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.details.get = AsyncMock(return_value=details)
+
+    with token_capturing_ctx(MODULE, graph_client, "my-obo") as received:
+        await get_plan_categories("plan-1")
+
+    assert received == ["my-obo"]
+
+
+async def test_get_plan_categories_calls_correct_plan_id(graph_ctx):
+    details = make_plan_details_obj(make_category_descriptions())
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.details.get = AsyncMock(return_value=details)
+
+    with graph_ctx(MODULE, graph_client):
+        await get_plan_categories("plan-xyz")
+
+    graph_client.planner.plans.by_planner_plan_id.assert_called_once_with("plan-xyz")
+
+
+async def test_get_plan_categories_404_raises_value_error(graph_ctx, make_odata_error):
+    # Graph returns 404 when a plan doesn't exist or the user can't access it.
+    # A clear ValueError is raised so the LLM can suggest the caller fetch a
+    # valid plan ID first, rather than surfacing a raw Graph error message.
+    graph_client = MagicMock()
+    graph_client.planner.plans.by_planner_plan_id.return_value.details.get = AsyncMock(
+        side_effect=make_odata_error(404, "ItemNotFound", "The requested item is not found.")
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(ValueError, match="not found"):
+            await get_plan_categories("bad-plan-id")
+

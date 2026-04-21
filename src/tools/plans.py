@@ -1,4 +1,5 @@
 from __future__ import annotations
+from msgraph.generated.planner.plans.item.planner_plan_item_request_builder import PlannerPlanItemRequestBuilder
 
 from typing import Annotated
 
@@ -188,11 +189,11 @@ async def create_plan(
         # discoverable via list_group_plans because Graph does not
         # automatically add the creator to plannerPlanDetails.sharedWith.
         # Docs: https://learn.microsoft.com/en-us/graph/api/plannerplandetails-update
-        plan_item = graph_client.planner.plans.by_planner_plan_id(result.id)
+        plan_item: PlannerPlanItemRequestBuilder = graph_client.planner.plans.by_planner_plan_id(result.id or "")
         try:
             me = await graph_client.me.get()
             if me and me.id:
-                details = await plan_item.details.get()
+                details: PlannerPlanDetails | None = await plan_item.details.get()
                 details_etag = (
                     details.additional_data.get("@odata.etag") if details else None
                 )
@@ -239,3 +240,63 @@ async def delete_plan(
             lambda: svc.refresh_etag(item.get, f"plan {plan_id!r}"),
         )
     return f"Deleted plan {plan_id!r}."
+
+
+# readOnlyHint=True: this tool reads plan details without any side effects.
+# Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
+@plans_router.tool(
+    name="get_plan_categories",
+    description=(
+        "Get the category label definitions for a Planner plan. "
+        "Returns all 25 category slots with their key (e.g. 'category1') and "
+        "display name. Slots without a custom label have a null display_name. "
+        "Note: category colours are assigned by the Planner UI and are not "
+        "stored in the Graph API."
+    ),
+    tags={"plans", "read"},
+    annotations={"readOnlyHint": True, "destructiveHint": False},
+)
+async def get_plan_categories(
+    plan_id: Annotated[str, "The ID of the plan (from list_my_plans or list_group_plans)."],
+) -> list[dict] | None:
+    token = get_access_token()
+    if token is None:
+        raise AuthorizationError("No access token available")
+
+    ctx = get_optional_context()
+
+    if ctx is not None:
+        await ctx.debug(f"Fetching category descriptions for plan {plan_id}")
+
+    async with graph_client_manager.for_user(token.token) as graph_client:
+        try:
+            details = await graph_client.planner.plans.by_planner_plan_id(plan_id).details.get()
+        except ODataError as exc:
+            # 404 means the plan doesn't exist or the user cannot access it.
+            # Return a clear message rather than a raw Graph error so the LLM
+            # can suggest the caller use list_my_plans or list_group_plans first.
+            # Docs: https://learn.microsoft.com/en-us/graph/api/plannerplandetails-get
+            if exc.response_status_code == 404:
+                raise ValueError(
+                    f"Plan {plan_id!r} not found. Use list_my_plans or list_group_plans to get a valid plan ID."
+                ) from exc
+            raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
+
+    if details is None or details.category_descriptions is None:
+        return None
+
+    # Use the SDK model's deserializer registry to enumerate category keys
+    # rather than hardcoding range(1, 26). If Microsoft adds more categories
+    # in a future SDK version they will appear automatically.
+    # We sort numerically (category1 < category2 < … < category25) because
+    # dict key order from get_field_deserializers() is alphabetical and would
+    # otherwise produce category1, category10, category11, … category9.
+    # Docs: https://learn.microsoft.com/en-us/graph/api/resources/plannercategorydescriptions
+    cat_keys = sorted(
+        (k for k in details.category_descriptions.get_field_deserializers() if k != "@odata.type"),
+        key=lambda k: int(k.removeprefix("category")),
+    )
+    return [
+        {"key": k, "display_name": getattr(details.category_descriptions, k, None)}
+        for k in cat_keys
+    ]
