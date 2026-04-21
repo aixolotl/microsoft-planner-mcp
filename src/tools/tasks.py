@@ -43,6 +43,28 @@ tasks_router = FastMCP("tasks")
 )
 async def list_my_tasks(
     select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "*all",
+    filter: Annotated[
+        str | None,
+        Field(
+            description=(
+                "OData filter expression. "
+                "Supported operators: eq, ne, gt, ge, lt, le, and, or, not. "
+                "Supported functions: startswith, endswith, contains. "
+                "Example to get all incomplete tasks: \"percentComplete ne 100\"."
+            ),
+            examples=["startswith(title, 'Project')", "title eq 'Project X'", "percentComplete ne 100", "startswith(title, 'Project') and percentComplete eq 0"],
+        ),
+    ] = None,
+    search: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Free-text search term matched as a case-insensitive substring "
+                "against the task title. Quotes are stripped automatically."
+            ),
+            examples=["Project", "Bug fix"],
+        ),
+    ] = None,
 ) -> list[dict] | None:
     token = get_access_token()
     if token is None:
@@ -70,16 +92,28 @@ async def list_my_tasks(
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
         try:
+            # Graph Planner ignores $filter and $search on /me/planner/tasks,
+            # so we fetch all items then filter client-side. Only $select is
+            # forwarded because it controls which fields Graph returns.
+            # Docs: https://github.com/aixolotl/microsoft-planner-mcp/issues/29
             tasks = await PlannerService.paginate(
                 graph_client.me.planner.tasks,
                 RequestConfiguration(
                     query_parameters=TasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
-                        select=select_fields
+                        select=select_fields,
                     )
                 ),
             )
         except ODataError as exc:
             raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
+
+    # Client-side filtering — applied after pagination so every item has
+    # been fetched. filter_items() parses the OData expression via
+    # odata-v4-query and evaluates it against each task's attributes.
+    if filter or search:
+        tasks = PlannerService.filter_items(
+            tasks, filter=filter, search=search, search_fields=["title"]
+        )
 
     if ctx is not None:
         await ctx.info(f"Found {len(tasks)} task(s) assigned to you")
@@ -98,6 +132,28 @@ async def list_my_tasks(
 async def list_tasks(
     plan_id: Annotated[str, "The ID of the plan to list tasks for (from list_my_plans or list_group_plans)."],
     select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "*all",
+    filter: Annotated[
+        str | None,
+        Field(
+            description=(
+                "OData filter expression. "
+                "Supported operators: eq, ne, gt, ge, lt, le, and, or, not. "
+                "Supported functions: startswith, endswith, contains. "
+                "Example to get all incomplete tasks: \"percentComplete ne 100\"."
+            ),
+            examples=["startswith(title, 'Project')", "title eq 'Project Task'", "percentComplete eq 0"],
+        ),
+    ] = None,
+    search: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Free-text search term matched as a case-insensitive substring "
+                "against the task title. Quotes are stripped automatically."
+            ),
+            examples=["Project", "Bug fix"],
+        ),
+    ] = None,
 ) -> list[dict] | None:
     token = get_access_token()
     if token is None:
@@ -120,16 +176,28 @@ async def list_tasks(
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
         try:
+            # Graph Planner ignores $filter and $search on plan-scoped tasks,
+            # so we fetch all items then filter client-side. Only $select is
+            # forwarded because it controls which fields Graph returns.
+            # Docs: https://github.com/aixolotl/microsoft-planner-mcp/issues/29
             tasks = await PlannerService.paginate(
                 graph_client.planner.plans.by_planner_plan_id(plan_id).tasks,
                 RequestConfiguration(
                     query_parameters=PlanTasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
-                        select=select_fields
+                        select=select_fields,
                     )
                 ),
             )
         except ODataError as exc:
             raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
+
+    # Client-side filtering — applied after pagination so every item has
+    # been fetched. filter_items() parses the OData expression via
+    # odata-v4-query and evaluates it against each task's attributes.
+    if filter or search:
+        tasks = PlannerService.filter_items(
+            tasks, filter=filter, search=search, search_fields=["title"]
+        )
 
     if ctx is not None:
         await ctx.info(f"Found {len(tasks)} task(s) in plan {plan_id}")

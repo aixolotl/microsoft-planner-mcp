@@ -210,6 +210,265 @@ def test_serialize_graph_list_returns_raw_when_disabled():
     assert result is tasks
 
 
+# ---------------------------------------------------------------------------
+# filter_items — client-side OData filtering
+# ---------------------------------------------------------------------------
+
+
+def _make_task(title: str = "My Task", percent_complete: int = 0) -> PlannerTask:
+    """Create a PlannerTask with the given title and percent_complete."""
+    t = PlannerTask()
+    t.title = title
+    t.percent_complete = percent_complete
+    return t
+
+
+@pytest.fixture
+def sample_tasks() -> list[PlannerTask]:
+    return [
+        _make_task("Project Alpha", 0),
+        _make_task("Project Beta", 50),
+        _make_task("Design Review", 100),
+        _make_task("Bug Fix", 25),
+    ]
+
+
+# -- eq (string, case-insensitive) --
+
+
+def test_filter_eq_string(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks, filter="title eq 'Project Alpha'")
+    assert len(result) == 1
+    assert result[0].title == "Project Alpha"
+
+
+def test_filter_eq_string_case_insensitive(sample_tasks):
+    # LLM callers may not match case exactly. Case-insensitive comparison
+    # ensures ``title eq 'project alpha'`` still matches.
+    result = PlannerService.filter_items(sample_tasks, filter="title eq 'project alpha'")
+    assert len(result) == 1
+    assert result[0].title == "Project Alpha"
+
+
+# -- eq (numeric) --
+
+
+def test_filter_eq_numeric(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks, filter="percentComplete eq 50")
+    assert len(result) == 1
+    assert result[0].title == "Project Beta"
+
+
+# -- ne --
+
+
+def test_filter_ne(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks, filter="percentComplete ne 0")
+    assert len(result) == 3
+    assert all(t.percent_complete != 0 for t in result)
+
+
+# -- eq (boolean: true / false / null) --
+
+
+def test_filter_eq_true():
+    # odata-v4-query parses ``true`` as an identifier, not a literal.
+    # Without special handling, ``hasDescription eq true`` would compare
+    # the field value against None (getattr for "true") and always fail.
+    t1 = _make_task("With desc")
+    t1.has_description = True
+    t2 = _make_task("No desc")
+    t2.has_description = False
+    result = PlannerService.filter_items([t1, t2], filter="hasDescription eq true")
+    assert len(result) == 1
+    assert result[0].title == "With desc"
+
+
+def test_filter_eq_false():
+    t1 = _make_task("With desc")
+    t1.has_description = True
+    t2 = _make_task("No desc")
+    t2.has_description = False
+    result = PlannerService.filter_items([t1, t2], filter="hasDescription eq false")
+    assert len(result) == 1
+    assert result[0].title == "No desc"
+
+
+def test_filter_eq_null():
+    t1 = _make_task("Has title")
+    t2 = PlannerTask()
+    t2.title = None
+    t2.percent_complete = 0
+    result = PlannerService.filter_items([t1, t2], filter="title eq null")
+    assert len(result) == 1
+    assert result[0].title is None
+
+
+def test_filter_ne_null():
+    t1 = _make_task("Has title")
+    t2 = PlannerTask()
+    t2.title = None
+    t2.percent_complete = 0
+    result = PlannerService.filter_items([t1, t2], filter="title ne null")
+    assert len(result) == 1
+    assert result[0].title == "Has title"
+
+
+# -- gt, ge, lt, le --
+
+
+@pytest.mark.parametrize("op,value,expected_count", [
+    ("gt", 25, 2),
+    ("ge", 25, 3),
+    ("lt", 50, 2),
+    ("le", 50, 3),
+], ids=["gt-25", "ge-25", "lt-50", "le-50"])
+def test_filter_comparison_operators(op, value, expected_count, sample_tasks):
+    result = PlannerService.filter_items(
+        sample_tasks, filter=f"percentComplete {op} {value}"
+    )
+    assert len(result) == expected_count
+
+
+# -- startswith --
+
+
+def test_filter_startswith(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks, filter="startswith(title, 'Project')")
+    assert len(result) == 2
+    assert all(t.title.startswith("Project") for t in result)
+
+
+def test_filter_startswith_case_insensitive(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks, filter="startswith(title, 'project')")
+    assert len(result) == 2
+
+
+# -- endswith --
+
+
+def test_filter_endswith(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks, filter="endswith(title, 'Review')")
+    assert len(result) == 1
+    assert result[0].title == "Design Review"
+
+
+# -- contains --
+
+
+def test_filter_contains(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks, filter="contains(title, 'ject')")
+    assert len(result) == 2
+
+
+# -- compound: and --
+
+
+def test_filter_and(sample_tasks):
+    result = PlannerService.filter_items(
+        sample_tasks, filter="startswith(title, 'Project') and percentComplete eq 0"
+    )
+    assert len(result) == 1
+    assert result[0].title == "Project Alpha"
+
+
+# -- compound: or --
+
+
+def test_filter_or(sample_tasks):
+    result = PlannerService.filter_items(
+        sample_tasks, filter="title eq 'Bug Fix' or title eq 'Design Review'"
+    )
+    assert len(result) == 2
+
+
+# -- not --
+
+
+def test_filter_not(sample_tasks):
+    result = PlannerService.filter_items(
+        sample_tasks, filter="not startswith(title, 'Project')"
+    )
+    assert len(result) == 2
+    assert all(not t.title.startswith("Project") for t in result)
+
+
+# -- search --
+
+
+def test_search_substring_match(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks, search="project")
+    assert len(result) == 2
+
+
+def test_search_strips_quotes(sample_tasks):
+    # LLM callers often wrap search terms in quotes.
+    result = PlannerService.filter_items(sample_tasks, search='"Bug"')
+    assert len(result) == 1
+    assert result[0].title == "Bug Fix"
+
+
+def test_search_custom_fields(sample_tasks):
+    # Searching a field that doesn't match should return nothing.
+    result = PlannerService.filter_items(
+        sample_tasks, search="Project", search_fields=["id"]
+    )
+    assert len(result) == 0
+
+
+# -- filter + search combined --
+
+
+def test_filter_and_search_combined(sample_tasks):
+    result = PlannerService.filter_items(
+        sample_tasks,
+        filter="percentComplete eq 0",
+        search="alpha",
+    )
+    assert len(result) == 1
+    assert result[0].title == "Project Alpha"
+
+
+# -- edge cases --
+
+
+def test_filter_none_returns_all(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks)
+    assert result is sample_tasks
+
+
+def test_filter_empty_list():
+    result = PlannerService.filter_items([], filter="title eq 'x'")
+    assert result == []
+
+
+def test_filter_no_match_returns_empty(sample_tasks):
+    result = PlannerService.filter_items(sample_tasks, filter="title eq 'Nonexistent'")
+    assert result == []
+
+
+def test_filter_none_field_value():
+    # When a field is None on the item, comparisons should return False
+    # rather than raising an exception.
+    task = PlannerTask()
+    task.title = None
+    task.percent_complete = 0
+    result = PlannerService.filter_items([task], filter="startswith(title, 'x')")
+    assert result == []
+
+
+def test_filter_unsupported_function_raises():
+    tasks = [_make_task()]
+    with pytest.raises(ValueError, match="Unsupported filter function"):
+        PlannerService.filter_items(tasks, filter="substring(title, 1)")
+
+
+def test_filter_unsupported_operator_raises():
+    tasks = [_make_task()]
+    with pytest.raises(ValueError, match="Unsupported filter operator"):
+        PlannerService.filter_items(tasks, filter="title has 'x'")
+
+
 async def test_with_retry_sends_fresh_etag_in_if_match_header(make_odata_error):
     """Integration-style: verifies the If-Match header carries the refreshed ETag.
 
