@@ -407,6 +407,7 @@ async def test_get_plan_categories_includes_display_names(graph_ctx):
     with graph_ctx(MODULE, graph_client):
         result = await get_plan_categories("plan-1")
 
+    assert result is not None
     cat3 = next(c for c in result if c["key"] == "category3")
     cat14 = next(c for c in result if c["key"] == "category14")
     cat1 = next(c for c in result if c["key"] == "category1")
