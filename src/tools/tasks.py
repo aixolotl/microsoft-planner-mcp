@@ -442,11 +442,16 @@ async def get_task_fields() -> list[dict]:
 
     def _entry(name: str, *, detailed: bool) -> dict:
         ann = _FIELD_ANNOTATIONS.get(name, {})
+        # Use None when writability is not annotated so callers can distinguish
+        # "unknown" from genuinely read-only. Without this, newly-added SDK
+        # fields are mislabeled as non-writable.
+        # Docs: https://learn.microsoft.com/en-us/graph/api/resources/plannertask
+        writable = ann["writable"] if "writable" in ann else None
         return {
             "name":        name,
             "type":        ann.get("type", "unknown"),
             "description": ann.get("description", ""),
-            "writable":    ann.get("writable", False),
+            "writable":    writable,
             "detailed":    detailed,
         }
 

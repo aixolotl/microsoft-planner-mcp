@@ -601,14 +601,18 @@ async def test_get_task_fields_returns_list():
         assert "description" in item
         assert "writable" in item
         assert isinstance(item["detailed"], bool)
-        assert isinstance(item["writable"], bool)
+        # writable may be None for unannotated SDK fields; bool when known.
+        assert item["writable"] is None or isinstance(item["writable"], bool)
 
 
 async def test_get_task_fields_no_token_required():
-    # get_task_fields is a static schema tool — it must not call get_access_token
-    # and must work with no auth context at all.
-    with patch(f"{MODULE}.get_access_token", return_value=None):
+    # Patch auth and assert it is never touched because get_task_fields is a
+    # static schema tool. Without assert_not_called(), a regression that starts
+    # calling get_access_token() but tolerates None would still pass this test.
+    # Docs: https://docs.python.org/3/library/unittest.mock.html#unittest.mock.Mock.assert_not_called
+    with patch(f"{MODULE}.get_access_token", return_value=None) as mock_get_access_token:
         result = await get_task_fields()
+    mock_get_access_token.assert_not_called()
     assert result is not None
 
 

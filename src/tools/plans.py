@@ -189,7 +189,14 @@ async def create_plan(
         # discoverable via list_group_plans because Graph does not
         # automatically add the creator to plannerPlanDetails.sharedWith.
         # Docs: https://learn.microsoft.com/en-us/graph/api/plannerplandetails-update
-        plan_item: PlannerPlanItemRequestBuilder = graph_client.planner.plans.by_planner_plan_id(result.id or "")
+        if not result.id:
+            # Guard against a missing ID: using "" would produce a request
+            # against by_planner_plan_id("") that either silently succeeds or
+            # is swallowed by the broad except block, masking the anomaly.
+            if ctx is not None:
+                await ctx.debug("Skipping auto-share: plan ID unexpectedly missing")
+            return svc.serialize_graph_object(result)
+        plan_item: PlannerPlanItemRequestBuilder = graph_client.planner.plans.by_planner_plan_id(result.id)
         try:
             me = await graph_client.me.get()
             if me and me.id:
