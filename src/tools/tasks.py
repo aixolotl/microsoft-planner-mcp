@@ -32,7 +32,7 @@ from ..services.planner_service import PlannerService
 tasks_router = FastMCP("tasks")
 
 # Fields on PlannerTask that are OData internals or navigation relationships
-# rather than selectable data properties. Excluded from get_task_fields so
+# rather than selectable data properties. Excluded from list_task_fields so
 # callers only see fields valid in $select or usable as task attributes.
 # Docs: https://learn.microsoft.com/en-us/graph/api/resources/plannertask#relationships
 _TASK_NON_DATA_FIELDS = frozenset({
@@ -71,7 +71,7 @@ _FIELD_ANNOTATIONS: dict[str, dict] = {
     "referenceCount":           {"type": "integer",        "writable": False, "description": "Read-only. Number of external references."},
     "checklistItemCount":       {"type": "integer",        "writable": False, "description": "Read-only. Total checklist items."},
     "activeChecklistItemCount": {"type": "integer",        "writable": False, "description": "Read-only. Incomplete checklist items."},
-    "appliedCategories":        {"type": "object",         "writable": True,  "description": "Categories applied to the task, keyed by category slot (e.g. {\"category3\": true}). Use get_plan_categories for label names."},
+    "appliedCategories":        {"type": "object",         "writable": True,  "description": "Categories applied to the task, keyed by category slot (e.g. {\"category3\": true}). Use list_plan_categories for label names."},
     "assignments":              {"type": "object",         "writable": True,  "description": "Map of user IDs to plannerAssignment objects."},
     "createdBy":                {"type": "object",         "writable": False, "description": "Read-only. Identity of the user who created the task."},
     "completedBy":              {"type": "object",         "writable": False, "description": "Read-only. Identity of the user who completed the task."},
@@ -413,7 +413,7 @@ async def update_task_details(
 
 
 @tasks_router.tool(
-    name="get_task_fields",
+    name="list_task_fields",
     description=(
         "Return metadata for every field on a Planner task. Each entry includes the field "
         "name (camelCase, usable in $select), its data type, a description, whether it is "
@@ -423,7 +423,7 @@ async def update_task_details(
     tags={"tasks", "read"},
     annotations={"readOnlyHint": True},
 )
-async def get_task_fields() -> list[dict]:
+async def list_task_fields() -> list[dict]:
     # Field names come from the SDK deserializer registry so they stay in sync
     # with the installed msgraph-sdk version automatically. _FIELD_ANNOTATIONS
     # adds type/description/writability — metadata the SDK doesn't expose.

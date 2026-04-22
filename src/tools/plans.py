@@ -252,7 +252,7 @@ async def delete_plan(
 # readOnlyHint=True: this tool reads plan details without any side effects.
 # Docs: https://gofastmcp.com/servers/tools#using-annotation-hints
 @plans_router.tool(
-    name="get_plan_categories",
+    name="list_plan_categories",
     description=(
         "Get the category label definitions for a Planner plan. "
         "Returns all 25 category slots with their key (e.g. 'category1') and "
@@ -263,7 +263,7 @@ async def delete_plan(
     tags={"plans", "read"},
     annotations={"readOnlyHint": True, "destructiveHint": False},
 )
-async def get_plan_categories(
+async def list_plan_categories(
     plan_id: Annotated[str, "The ID of the plan (from list_my_plans or list_group_plans)."],
 ) -> list[dict] | None:
     token = get_access_token()
@@ -303,7 +303,8 @@ async def get_plan_categories(
         (k for k in details.category_descriptions.get_field_deserializers() if k != "@odata.type"),
         key=lambda k: int(k.removeprefix("category")),
     )
+    etag = details.additional_data.get("@odata.etag") if details.additional_data else None
     return [
-        {"key": k, "display_name": getattr(details.category_descriptions, k, None)}
+        {"key": k, "display_name": getattr(details.category_descriptions, k, None), "@odata.etag": etag}
         for k in cat_keys
     ]

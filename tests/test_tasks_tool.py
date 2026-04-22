@@ -15,7 +15,7 @@ from src.tools.tasks import (
     create_task,
     delete_task,
     get_task_details,
-    get_task_fields,
+    list_task_fields,
     list_my_tasks,
     list_tasks,
     update_task,
@@ -586,12 +586,12 @@ async def test_create_task_odata_error(status, code, exc_type, graph_ctx, make_o
 
 
 # ---------------------------------------------------------------------------
-# Tests: get_task_fields
+# Tests: list_task_fields
 # ---------------------------------------------------------------------------
 
 
-async def test_get_task_fields_returns_list():
-    result = await get_task_fields()
+async def test_list_task_fields_returns_list():
+    result = await list_task_fields()
     assert isinstance(result, list)
     assert len(result) > 0
     for item in result:
@@ -605,19 +605,19 @@ async def test_get_task_fields_returns_list():
         assert item["writable"] is None or isinstance(item["writable"], bool)
 
 
-async def test_get_task_fields_no_token_required():
-    # Patch auth and assert it is never touched because get_task_fields is a
+async def test_list_task_fields_no_token_required():
+    # Patch auth and assert it is never touched because list_task_fields is a
     # static schema tool. Without assert_not_called(), a regression that starts
     # calling get_access_token() but tolerates None would still pass this test.
     # Docs: https://docs.python.org/3/library/unittest.mock.html#unittest.mock.Mock.assert_not_called
     with patch(f"{MODULE}.get_access_token", return_value=None) as mock_get_access_token:
-        result = await get_task_fields()
+        result = await list_task_fields()
     mock_get_access_token.assert_not_called()
     assert result is not None
 
 
-async def test_get_task_fields_has_detailed_and_non_detailed():
-    result = await get_task_fields()
+async def test_list_task_fields_has_detailed_and_non_detailed():
+    result = await list_task_fields()
     detailed = [f for f in result if f["detailed"]]
     non_detailed = [f for f in result if not f["detailed"]]
     assert len(detailed) > 0, "expected at least one detailed field"
@@ -633,8 +633,8 @@ async def test_get_task_fields_has_detailed_and_non_detailed():
     ("checklist", True, True),
     ("references", True, True),
 ], ids=["id-not-detailed", "title-not-detailed", "percent-not-detailed", "completedDateTime-readonly", "description-detailed", "checklist-detailed", "references-detailed"])
-async def test_get_task_fields_known_field_values(field_name, expected_detailed, expected_writable):
-    result = await get_task_fields()
+async def test_list_task_fields_known_field_values(field_name, expected_detailed, expected_writable):
+    result = await list_task_fields()
     field = next((f for f in result if f["name"] == field_name), None)
     assert field is not None, f"field {field_name!r} not found in result"
     assert field["detailed"] is expected_detailed
