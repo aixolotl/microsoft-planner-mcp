@@ -31,6 +31,59 @@ from ..services.planner_service import PlannerService
 
 tasks_router = FastMCP("tasks")
 
+# Fields on PlannerTask that are OData internals or navigation relationships
+# rather than selectable data properties. Excluded from list_task_fields so
+# callers only see fields valid in $select or usable as task attributes.
+# Docs: https://learn.microsoft.com/en-us/graph/api/resources/plannertask#relationships
+_TASK_NON_DATA_FIELDS = frozenset({
+    "@odata.type",
+    "assignedToTaskBoardFormat",  # navigation: board view format
+    "bucketTaskBoardFormat",       # navigation: board view format
+    "progressTaskBoardFormat",     # navigation: board view format
+    "details",                     # navigation: PlannerTaskDetails sub-resource
+})
+
+# Fields on PlannerTaskDetails that are OData internals, not data properties.
+_DETAIL_NON_DATA_FIELDS = frozenset({"@odata.type", "id"})
+
+# Annotations for each PlannerTask and PlannerTaskDetails field.
+# Field names come from get_field_deserializers() (SDK-derived). This table
+# only adds the metadata the SDK doesn't expose: type, description, writability.
+# Fields absent from this table fall back to type="unknown", writable=False.
+# Docs: https://learn.microsoft.com/en-us/graph/api/resources/plannertask
+#       https://learn.microsoft.com/en-us/graph/api/resources/plannertaskdetails
+_FIELD_ANNOTATIONS: dict[str, dict] = {
+    # ----- PlannerTask fields -----
+    "id":                       {"type": "string",         "writable": False, "description": "Unique identifier of the task (28 chars)."},
+    "title":                    {"type": "string",         "writable": True,  "description": "Title of the task."},
+    "planId":                   {"type": "string",         "writable": True,  "description": "ID of the plan this task belongs to."},
+    "bucketId":                 {"type": "string",         "writable": True,  "description": "ID of the bucket this task is placed in."},
+    "orderHint":                {"type": "string",         "writable": True,  "description": "Hint used to order tasks in list view."},
+    "assigneePriority":         {"type": "string",         "writable": True,  "description": "Hint for ordering within an assignee's task list."},
+    "percentComplete":          {"type": "integer",        "writable": True,  "description": "Completion percentage (0–100). Set to 100 to mark complete."},
+    "priority":                 {"type": "integer",        "writable": True,  "description": "Priority 0 (urgent)–10 (low). Planner maps: 1=urgent, 3=important, 5=medium, 9=low."},
+    "startDateTime":            {"type": "DateTimeOffset", "writable": True,  "description": "ISO 8601 UTC start date/time."},
+    "dueDateTime":              {"type": "DateTimeOffset", "writable": True,  "description": "ISO 8601 UTC due date/time."},
+    "completedDateTime":        {"type": "DateTimeOffset", "writable": False, "description": "Read-only. When percentComplete was set to 100."},
+    "createdDateTime":          {"type": "DateTimeOffset", "writable": False, "description": "Read-only. When the task was created."},
+    "hasDescription":           {"type": "boolean",        "writable": False, "description": "Read-only. True if the task details description is non-empty."},
+    "previewType":              {"type": "string",         "writable": True,  "description": "Preview style: automatic | noPreview | checklist | description | reference."},
+    "referenceCount":           {"type": "integer",        "writable": False, "description": "Read-only. Number of external references."},
+    "checklistItemCount":       {"type": "integer",        "writable": False, "description": "Read-only. Total checklist items."},
+    "activeChecklistItemCount": {"type": "integer",        "writable": False, "description": "Read-only. Incomplete checklist items."},
+    "appliedCategories":        {"type": "object",         "writable": True,  "description": "Categories applied to the task, keyed by category slot (e.g. {\"category3\": true}). Use list_plan_categories for label names."},
+    "assignments":              {"type": "object",         "writable": True,  "description": "Map of user IDs to plannerAssignment objects."},
+    "createdBy":                {"type": "object",         "writable": False, "description": "Read-only. Identity of the user who created the task."},
+    "completedBy":              {"type": "object",         "writable": False, "description": "Read-only. Identity of the user who completed the task."},
+    "conversationThreadId":     {"type": "string",         "writable": False, "description": "Thread ID of the conversation on the task."},
+    # ----- PlannerTaskDetails fields (require get_task_details) -----
+    # previewType appears on both resources but means the same thing; the
+    # details entry shadows the task-level one only when detailed=True.
+    "description":              {"type": "string",         "writable": True,  "description": "Plain-text task description (up to 2000 chars)."},
+    "checklist":                {"type": "object",         "writable": True,  "description": "Checklist items keyed by GUID. Each item has title, isChecked, and orderHint."},
+    "references":               {"type": "object",         "writable": True,  "description": "External references keyed by encoded URL. Each has alias, type, and previewPriority."},
+}
+
 
 # readOnlyHint=True signals to MCP clients that this tool never mutates state,
 # allowing them to skip user confirmation prompts for read operations.
@@ -425,6 +478,55 @@ async def update_task_details(
             lambda: svc.refresh_etag(item.get, f"task details {task_id!r}"),
         )
         return svc.serialize_graph_object(result) if result else None
+
+
+@tasks_router.tool(
+    name="list_task_fields",
+    description=(
+        "Return metadata for every field on a Planner task. Each entry includes the field "
+        "name (camelCase, usable in $select), its data type, a description, whether it is "
+        "writable, and whether it lives on the task resource directly or on the separate "
+        "PlannerTaskDetails sub-resource (requiring a get_task_details call)."
+    ),
+    tags={"tasks", "read"},
+    annotations={"readOnlyHint": True},
+)
+async def list_task_fields() -> list[dict]:
+    # Field names come from the SDK deserializer registry so they stay in sync
+    # with the installed msgraph-sdk version automatically. _FIELD_ANNOTATIONS
+    # adds type/description/writability — metadata the SDK doesn't expose.
+    # Fields missing from the annotation table get sensible defaults so we
+    # never silently drop a field the SDK adds in a future version.
+    # Docs: https://learn.microsoft.com/en-us/graph/api/resources/plannertask
+    #       https://learn.microsoft.com/en-us/graph/api/resources/plannertaskdetails
+    task_names = sorted(
+        k for k in PlannerTask().get_field_deserializers()
+        if k not in _TASK_NON_DATA_FIELDS
+    )
+    detail_names = sorted(
+        k for k in PlannerTaskDetails().get_field_deserializers()
+        if k not in _DETAIL_NON_DATA_FIELDS
+    )
+
+    def _entry(name: str, *, detailed: bool) -> dict:
+        ann = _FIELD_ANNOTATIONS.get(name, {})
+        # Use None when writability is not annotated so callers can distinguish
+        # "unknown" from genuinely read-only. Without this, newly-added SDK
+        # fields are mislabeled as non-writable.
+        # Docs: https://learn.microsoft.com/en-us/graph/api/resources/plannertask
+        writable = ann["writable"] if "writable" in ann else None
+        return {
+            "name":        name,
+            "type":        ann.get("type", "unknown"),
+            "description": ann.get("description", ""),
+            "writable":    writable,
+            "detailed":    detailed,
+        }
+
+    return (
+        [_entry(n, detailed=False) for n in task_names]
+        + [_entry(n, detailed=True) for n in detail_names]
+    )
 
 
 @tasks_router.tool(
