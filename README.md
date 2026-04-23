@@ -290,7 +290,7 @@ Get category label definitions for a Planner plan. Returns all 25 category slots
 
 - **Returns:** List of category objects (`key`, `display_name`) or `null`
 
-> **Note:** The list of categories is static as the API does not return display names or colours. But this endpoint awaits Microsofts future updates to the API to fully support categories.
+> **Note:** The list of categories is static as the API does not return display names or colours. But this endpoint awaits Microsoft's future updates to the API to fully support categories.
 
 ### Buckets
 
