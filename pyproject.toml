@@ -3,6 +3,7 @@ name = "microsoft-planner-mcp"
 version = "0.1.0"
 description = "MCP server for Microsoft Planner via Microsoft Graph"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
     "fastmcp[apps]>=3.2.3",
