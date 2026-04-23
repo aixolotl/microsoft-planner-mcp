@@ -419,7 +419,7 @@ Return metadata for every field on a Planner task, including its data type, desc
 - **Parameters:** None
 - **Returns:** List of field metadata objects (`name`, `type`, `description`, `writable`, `detailed`)
 
-> **Note:** The list of fields is static as Planner Standard doesn't support custom fields. But this endpoint awaits Microsofts future updates to the API to fully support Planner Premium.
+> **Note:** The list of fields is static as Planner Standard doesn't support custom fields. But this endpoint awaits Microsoft's future updates to the API to fully support Planner Premium.
 
 #### `delete_task`
 
