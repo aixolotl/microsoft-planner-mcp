@@ -134,7 +134,7 @@ TENANT_ID=your-azure-tenant-id
 # Public URL of this server (used for OAuth redirect URI)
 BASE_URL=http://localhost:8000
 
-# Comma-separated list of allowed CORS origins
+# JSON-encoded list of allowed CORS origins
 # Include http://localhost:6274 if using MCP Inspector for testing
 ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274"]
 ```
