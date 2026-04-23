@@ -1,8 +1,8 @@
 # Microsoft Planner MCP
 
-An [MCP](https://modelcontextprotocol.io/) server that connects AI assistants — such as VS Code Copilot, Claude Desktop, and other MCP-compatible clients — to [Microsoft Planner](https://www.microsoft.com/en-us/microsoft-365/business/task-management-software). Ask your AI assistant to create tasks, organise plans, manage buckets, and more, all through natural language.
+An [MCP](https://modelcontextprotocol.io/) server that connects AI assistants to [Microsoft Planner](https://www.microsoft.com/en-us/microsoft-365/business/task-management-software). Ask your AI assistant to create tasks, organise plans, manage buckets, and more, all through natural language.
 
-> **Note:** This MCP does not support Planner Premium at this time.
+> **Note:** This MCP only supports Planner basic tasks and plans
 
 Built with [FastMCP](https://gofastmcp.com) and authenticated via [Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/) (Azure AD) using the On-Behalf-Of (OBO) flow to call [Microsoft Graph](https://learn.microsoft.com/en-us/graph/overview).
 
