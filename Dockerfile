@@ -2,6 +2,10 @@
 # Use a Python image with uv pre-installed
 FROM ghcr.io/astral-sh/uv:python3.12-bookworm-slim
 
+LABEL org.opencontainers.image.source=https://github.com/aixolotl/microsoft-planner-mcp
+LABEL org.opencontainers.image.description="Microsoft Planner MCP server with FastMCP Entra ID OBO Authentication"
+LABEL org.opencontainers.image.licenses=MIT
+
 # Setup a non-root user
 RUN groupadd --system --gid 999 nonroot \
  && useradd --system --gid 999 --uid 999 --create-home nonroot
