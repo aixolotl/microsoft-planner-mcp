@@ -179,7 +179,7 @@ This starts the MCP server on port 8000. The Docker Compose configuration also i
 
 Once the server is running, configure your MCP client to connect to it.
 
-### VS Code (GitHub Copilot)
+### VS Code
 
 Add the following to your VS Code settings (`.vscode/settings.json` in your project, or your user settings):
 
@@ -197,26 +197,6 @@ Add the following to your VS Code settings (`.vscode/settings.json` in your proj
 ```
 
 Then use Copilot Chat in **Agent mode** and ask it to interact with your Planner tasks. Copilot will discover the available tools automatically.
-
-### Claude Desktop
-
-Add the following to your Claude Desktop configuration file:
-
-- **macOS:** `~/Library/Application Support/Claude/claude_desktop_config.json`
-- **Windows:** `%APPDATA%\Claude\claude_desktop_config.json`
-
-```json
-{
-  "mcpServers": {
-    "planner": {
-      "type": "streamable-http",
-      "url": "http://localhost:8000/mcp"
-    }
-  }
-}
-```
-
-Restart Claude Desktop after saving. You will be prompted to authenticate with your Microsoft account on first use.
 
 ### Other MCP Clients
 
