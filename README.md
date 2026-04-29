@@ -47,7 +47,7 @@ To run the server locally you also need:
 
 Or, to run via Docker:
 
-- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/)
+- [Docker](https://docs.docker.com/get-docker/)
 
 ## Azure Entra ID Setup
 
@@ -150,6 +150,24 @@ uv run uvicorn src.server:app --host 0.0.0.0 --port 8000
 The MCP endpoint is available at `http://localhost:8000/mcp`. A health check endpoint is at `http://localhost:8000/health`.
 
 ### Running with Docker
+
+```bash
+# Pull the latest image
+docker pull ghcr.io/aixolotl/microsoft-planner-mcp:latest
+
+# Run with environment variables
+docker run --rm -i \
+  -e BASE_URL=https://localhost:8000 \
+  -e CLIENT_ID=your_client_id \
+  -e CLIENT_SECRET=your_api_token \
+  -e TENANT_ID=your_tenant_id \
+  -e ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274", "http://localhost:3000"] \
+  ghcr.io/aixolotl/microsoft-planner-mcp:latest
+```
+
+This starts the MCP server on port 8000.
+
+### Running with Docker compose
 
 ```bash
 docker compose up
