@@ -1,10 +1,13 @@
-# Microsoft Planner MCP
+# MCP Server for Microsoft Planner
 
 An [MCP](https://modelcontextprotocol.io/) server that connects AI assistants to [Microsoft Planner](https://www.microsoft.com/en-us/microsoft-365/business/task-management-software). Ask your AI assistant to create tasks, organise plans, manage buckets, and more, all through natural language.
 
-> **Note:** This MCP only supports Planner basic tasks and plans
+***Note: This MCP only supports Planner basic tasks and plans***
 
 Built with [FastMCP](https://gofastmcp.com) and authenticated via [Microsoft Entra ID](https://learn.microsoft.com/en-us/entra/identity-platform/) (Azure AD) using the On-Behalf-Of (OBO) flow to call [Microsoft Graph](https://learn.microsoft.com/en-us/graph/overview).
+
+> This is an unofficial, community/open-source MCP server for Microsoft Planner.  
+> It is not affiliated with, endorsed by, or sponsored by Microsoft.
 
 ## Table of Contents
 
