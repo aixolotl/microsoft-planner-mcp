@@ -70,7 +70,7 @@ An Azure app registration is required so the server can authenticate users and c
 2. Add these permissions:
    - `Tasks.ReadWrite` — read and write Planner tasks
    - `User.Read` — read the signed-in user's profile
-   - `User.ReadBasic.All` — resolve user display names from the GUIDs in task assignments
+   - `User.ReadBasic.All` — resolve user display names from the GUIDs in task assignments (required only for `list_users` tool)
 3. Click **Grant admin consent** for your organisation
 
 ### Step 3 — Expose an API Scope
