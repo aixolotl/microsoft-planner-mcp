@@ -103,6 +103,8 @@ class PlannerService:
         Returns:
             Flat list of items, capped at ``top`` when supplied.
         """
+        if top is not None and top <= 0:
+            return []
         result = await request_builder.get(request_configuration=request_configuration)
         if result is None or not result.value:
             return []
