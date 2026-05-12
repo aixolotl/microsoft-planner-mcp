@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     REQUIRE_AUTHORIZATION_CONSENT: bool = True
 
 
-# CLIENT_SECRET, and TENANT_ID from the environment / .env at runtime, so
-# there are no missing arguments at runtime even though the static type
-# checker cannot verify this without reading the environment itself.
+# pydantic-settings reads CLIENT_ID, CLIENT_SECRET, and TENANT_ID from the
+# environment / .env at runtime, so there are no missing arguments even though
+# the static type checker cannot verify environment-derived values itself.
 settings = Settings()  # ty:ignore[missing-argument]

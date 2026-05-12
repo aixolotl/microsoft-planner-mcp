@@ -141,7 +141,7 @@ BASE_URL=http://localhost:8000
 # Include http://localhost:6274 if using MCP Inspector for testing
 ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274"]
 
-# Disable FastMCP's extra client consent prompt for local development only
+# Require FastMCP's extra client consent prompt (set false only for local dev)
 REQUIRE_AUTHORIZATION_CONSENT=true
 ```
 
