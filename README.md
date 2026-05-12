@@ -228,7 +228,7 @@ Retrieve Microsoft 365 users by GUID, e-mail address, or free-text search. Usefu
 | Parameter | Type | Required | Description |
 |---|---|---|---|
 | `select` | string | No | Comma-separated fields to include (default: `id,displayName,mail,userPrincipalName`). Pass `*all` for all fields. |
-| `search` | string | No | OData search string, e.g. `"displayName:Alice"` or `"surname:Smith"` |
+| `search` | string | No | Free text search on display name, or search by field name and value, e.g. `Alice` or `surname:Smith` |
 | `guids` | list[string] | No | User object GUIDs to look up. Translated to an OData `$filter` expression. |
 | `emails` | list[string] | No | User principal names (UPNs / e-mail addresses) to look up. Translated to an OData `$filter` expression. |
 | `top` | integer | No | Maximum number of users to return (default: `10`). Ignored when `guids` or `emails` are provided. |
