@@ -70,6 +70,7 @@ An Azure app registration is required so the server can authenticate users and c
 2. Add these permissions:
    - `Tasks.ReadWrite` — read and write Planner tasks
    - `User.Read` — read the signed-in user's profile
+   - `User.ReadBasic.All` — resolve user display names from the GUIDs in task assignments
 3. Click **Grant admin consent** for your organisation
 
 ### Step 3 — Expose an API Scope
@@ -219,6 +220,22 @@ Return the authenticated user's profile from Microsoft Graph.
 
 - **Parameters:** None
 - **Returns:** User profile object (id, displayName, mail, etc.) or `null`
+
+#### `list_users`
+
+Retrieve Microsoft 365 users by GUID, e-mail address, or free-text search. Useful for resolving the user GUIDs returned in task assignment objects to display names.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `select` | string | No | Comma-separated fields to include (default: `id,displayName,mail,userPrincipalName`). Pass `*all` for all fields. |
+| `search` | string | No | OData search string, e.g. `"displayName:Alice"` or `"surname:Smith"` |
+| `guids` | list[string] | No | User object GUIDs to look up. Translated to an OData `$filter` expression. |
+| `emails` | list[string] | No | User principal names (UPNs / e-mail addresses) to look up. Translated to an OData `$filter` expression. |
+| `top` | integer | No | Maximum number of users to return (default: `10`). Ignored when `guids` or `emails` are provided. |
+
+- **Returns:** List of user objects or `null`
+
+> **Note:** When both `guids`/`emails` and `search` are supplied, the GUID/email filter takes priority. Very large lists of GUIDs or e-mail addresses are silently truncated to stay within the 2 048-character Graph URL limit.
 
 ### Groups
 

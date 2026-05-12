@@ -84,27 +84,46 @@ class PlannerService:
     # ------------------------------------------------------------------
 
     @staticmethod
-    async def paginate(request_builder: CollectionRequestBuilder, request_configuration: RequestConfiguration | None = None) -> list:
-        """Fetch all pages from a Graph collection endpoint using PageIterator.
+    async def paginate(
+        request_builder: CollectionRequestBuilder,
+        request_configuration: RequestConfiguration | None = None,
+        *,
+        top: int | None = None,
+    ) -> list:
+        """Fetch pages from a Graph collection endpoint using PageIterator.
 
         Args:
             request_builder: A Graph SDK request builder that supports .get().
             request_configuration: Optional RequestConfiguration for the first request.
+            top: Optional ceiling on the total number of items returned across all
+                pages. When provided, iteration stops as soon as this many items
+                have been collected — even if further pages exist. When ``None``
+                (the default) all pages are fetched.
 
         Returns:
-            Flat list of all items from all pages.
+            Flat list of items, capped at ``top`` when supplied.
         """
         result = await request_builder.get(request_configuration=request_configuration)
         if result is None or not result.value:
             return []
         all_items: list = []
+
+        def _callback(item: Any) -> bool:
+            all_items.append(item)
+            # Return False to stop PageIterator once we reach the top limit.
+            # Without this, paginate() would follow every @odata.nextLink even
+            # when the caller only needs the first N items (e.g. list_users with
+            # top=10), causing unnecessary Graph API requests.
+            # Docs: https://learn.microsoft.com/en-us/graph/sdks/paging
+            return top is None or len(all_items) < top
+
         # PageIterator follows @odata.nextLink URLs automatically until no more
         # pages exist. Using it instead of a manual while-loop is safer because
         # the SDK handles auth header injection, request retry, and deseriali-
         # sation for each subsequent page request.
         # Docs: https://learn.microsoft.com/en-us/graph/sdks/paging
         page_iterator = PageIterator(result, request_builder.request_adapter)
-        await page_iterator.iterate(lambda item: all_items.append(item) or True)
+        await page_iterator.iterate(_callback)
         return all_items
 
     # ------------------------------------------------------------------

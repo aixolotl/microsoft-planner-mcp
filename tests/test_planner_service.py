@@ -469,6 +469,72 @@ def test_filter_unsupported_operator_raises():
         PlannerService.filter_items(tasks, filter="title has 'x'")
 
 
+# ---------------------------------------------------------------------------
+# paginate — top parameter
+# ---------------------------------------------------------------------------
+
+
+def _make_page_result(items):
+    """Create a single-page mock result with no next link."""
+    result = MagicMock()
+    result.value = items
+    result.odata_next_link = None
+    return result
+
+
+def _make_request_builder(items):
+    """Return a mock request builder whose .get() yields a single page of items."""
+    rb = MagicMock()
+    rb.get = AsyncMock(return_value=_make_page_result(items))
+    rb.request_adapter = MagicMock()
+    return rb
+
+
+async def test_paginate_returns_all_items_when_top_is_none():
+    tasks = [_make_task(f"Task {i}") for i in range(5)]
+    result = await PlannerService.paginate(_make_request_builder(tasks))
+    assert result == tasks
+
+
+async def test_paginate_top_truncates_to_limit():
+    # When top < total items, paginate() must stop collecting after top items
+    # so we avoid unnecessary Graph API page requests. Without this, an agent
+    # calling list_users(top=10) could fetch thousands of directory users.
+    tasks = [_make_task(f"Task {i}") for i in range(10)]
+    result = await PlannerService.paginate(_make_request_builder(tasks), top=3)
+    assert len(result) == 3
+    assert result == tasks[:3]
+
+
+async def test_paginate_top_larger_than_available_returns_all():
+    # When top > total items no truncation should occur — return everything.
+    tasks = [_make_task(f"Task {i}") for i in range(4)]
+    result = await PlannerService.paginate(_make_request_builder(tasks), top=100)
+    assert result == tasks
+
+
+async def test_paginate_top_exact_boundary():
+    # top == len(items) — all items are returned, none are dropped.
+    tasks = [_make_task(f"Task {i}") for i in range(5)]
+    result = await PlannerService.paginate(_make_request_builder(tasks), top=5)
+    assert result == tasks
+
+
+async def test_paginate_top_one_returns_single_item():
+    tasks = [_make_task(f"Task {i}") for i in range(5)]
+    result = await PlannerService.paginate(_make_request_builder(tasks), top=1)
+    assert len(result) == 1
+    assert result[0] is tasks[0]
+
+
+async def test_paginate_returns_empty_for_none_result():
+    rb = MagicMock()
+    rb.get = AsyncMock(return_value=None)
+    rb.request_adapter = MagicMock()
+    result = await PlannerService.paginate(rb)
+    assert result == []
+
+
 async def test_with_retry_sends_fresh_etag_in_if_match_header(make_odata_error):
     """Integration-style: verifies the If-Match header carries the refreshed ETag.
 
