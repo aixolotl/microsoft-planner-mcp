@@ -42,4 +42,4 @@ class Settings(BaseSettings):
 # pydantic-settings reads CLIENT_ID, CLIENT_SECRET, and TENANT_ID from the
 # environment / .env at runtime, so there are no missing arguments even though
 # the static type checker cannot verify environment-derived values itself.
-settings = Settings()  # ty:ignore[missing-argument]
+settings = Settings()  # type:ignore[call-arg]

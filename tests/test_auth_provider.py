@@ -49,16 +49,16 @@ def test_auth_provider_passes_configured_require_authorization_consent(monkeypat
 
     settings = config_module.Settings(_env_file=None)
     original_settings = config_module.settings
-    auth_provider_module = sys.modules.get(MODULE)
+    existing_module = sys.modules.get(MODULE)
 
     try:
         with patch.object(config_module, "settings", settings), patch(
             "fastmcp.server.auth.providers.azure.AzureProvider"
         ) as mock_provider:
-            if auth_provider_module is None:
+            if existing_module is None:
                 importlib.import_module(MODULE)
             else:
-                importlib.reload(auth_provider_module)
+                importlib.reload(existing_module)
 
         mock_provider.assert_called_once()
         assert mock_provider.call_args.kwargs["require_authorization_consent"] is False
