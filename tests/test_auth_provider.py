@@ -29,6 +29,15 @@ def test_settings_default_require_authorization_consent_is_true(monkeypatch):
     assert settings.REQUIRE_AUTHORIZATION_CONSENT is True
 
 
+def test_settings_reads_require_authorization_consent_env(monkeypatch):
+    monkeypatch.delenv("REQUIRE_AUTHORIZATION_CONSENT", raising=False)
+    monkeypatch.setenv("REQUIRE_AUTHORIZATION_CONSENT", "false")
+
+    settings = config_module.Settings(_env_file=None)
+
+    assert settings.REQUIRE_AUTHORIZATION_CONSENT is False
+
+
 def test_settings_reads_lowercase_require_authorization_consent_env(monkeypatch):
     monkeypatch.delenv("REQUIRE_AUTHORIZATION_CONSENT", raising=False)
     monkeypatch.setenv("require_authorization_consent", "false")
