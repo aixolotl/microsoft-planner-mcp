@@ -13,6 +13,9 @@ from msgraph.generated.users.users_request_builder import UsersRequestBuilder
 
 from src.tools.users import _build_id_filter, _normalize_search, list_users
 
+_GUID_1 = "00000000-0000-0000-0000-000000000001"
+_GUID_2 = "00000000-0000-0000-0000-000000000002"
+
 # Patch at the usage module, not the definition module. Python resolves the
 # imported reference when the tool module is first loaded; patching the
 # definition site after that has no effect on the already-bound name.
@@ -224,10 +227,10 @@ async def test_guids_build_filter_expression(graph_ctx):
     graph_client.users.get = get_mock
 
     with graph_ctx(MODULE, graph_client):
-        await list_users(guids=["guid-1", "guid-2"])
+        await list_users(guids=[_GUID_1, _GUID_2])
 
     config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
-    assert config.query_parameters.filter == "id eq 'guid-1' or id eq 'guid-2'"
+    assert config.query_parameters.filter == f"id eq '{_GUID_1}' or id eq '{_GUID_2}'"
 
 
 async def test_emails_build_filter_expression(graph_ctx):
@@ -248,11 +251,11 @@ async def test_guids_and_emails_combined_in_filter(graph_ctx):
     graph_client.users.get = get_mock
 
     with graph_ctx(MODULE, graph_client):
-        await list_users(guids=["guid-1"], emails=["bob@example.com"])
+        await list_users(guids=[_GUID_1], emails=["bob@example.com"])
 
     config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
     assert config.query_parameters.filter == (
-        "id eq 'guid-1' or userPrincipalName eq 'bob@example.com'"
+        f"id eq '{_GUID_1}' or userPrincipalName eq 'bob@example.com'"
     )
 
 
@@ -265,7 +268,7 @@ async def test_filter_mode_adds_consistency_level_header(graph_ctx):
     graph_client.users.get = get_mock
 
     with graph_ctx(MODULE, graph_client):
-        await list_users(guids=["guid-1"])
+        await list_users(guids=[_GUID_1])
 
     config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
     assert config.query_parameters.count is True
@@ -281,7 +284,7 @@ async def test_filter_mode_ignores_top_param(graph_ctx):
     graph_client.users.get = get_mock
 
     with graph_ctx(MODULE, graph_client):
-        await list_users(guids=["guid-1"], top=5)
+        await list_users(guids=[_GUID_1], top=5)
 
     config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
     assert config.query_parameters.top is None
@@ -296,7 +299,7 @@ async def test_guids_takes_priority_over_search(graph_ctx):
     graph_client.users.get = get_mock
 
     with graph_ctx(MODULE, graph_client):
-        await list_users(guids=["guid-1"], search='"displayName:Alice"')
+        await list_users(guids=[_GUID_1], search='"displayName:Alice"')
 
     config: RequestConfiguration = get_mock.call_args.kwargs["request_configuration"]
     assert config.query_parameters.filter is not None
@@ -309,8 +312,8 @@ async def test_guids_takes_priority_over_search(graph_ctx):
 
 
 def test_build_id_filter_guids_only():
-    result = _build_id_filter(["a", "b"], None)
-    assert result == "id eq 'a' or id eq 'b'"
+    result = _build_id_filter([_GUID_1, _GUID_2], None)
+    assert result == f"id eq '{_GUID_1}' or id eq '{_GUID_2}'"
 
 
 def test_build_id_filter_emails_only():
@@ -319,8 +322,8 @@ def test_build_id_filter_emails_only():
 
 
 def test_build_id_filter_combined():
-    result = _build_id_filter(["a"], ["x@y.com"])
-    assert result == "id eq 'a' or userPrincipalName eq 'x@y.com'"
+    result = _build_id_filter([_GUID_1], ["x@y.com"])
+    assert result == f"id eq '{_GUID_1}' or userPrincipalName eq 'x@y.com'"
 
 
 def test_build_id_filter_truncates_at_2048_chars():
@@ -330,6 +333,47 @@ def test_build_id_filter_truncates_at_2048_chars():
     many_guids = [guid] * 100
     result = _build_id_filter(many_guids, None)
     assert len(result) <= 2048
+
+
+# ---------------------------------------------------------------------------
+# Tests: _build_id_filter validation
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "guids,emails",
+    [
+        # Single quote in GUID — would break/alter the OData $filter expression
+        (["00000000-0000-0000-0000-00000000000'"], None),
+        # Completely invalid format
+        (["not-a-guid"], None),
+        # Embedded OData operator
+        (["id eq '1') or (1 eq 1"], None),
+        # Single quote in email
+        (None, ["alice'@example.com"]),
+        # Parentheses in email
+        (None, ["alice(@example.com"]),
+        # Spaces in email
+        (None, ["alice @example.com"]),
+        # Missing @ in email
+        (None, ["alice-example.com"]),
+    ],
+    ids=[
+        "guid-single-quote",
+        "guid-invalid-format",
+        "guid-odata-injection",
+        "email-single-quote",
+        "email-parentheses",
+        "email-spaces",
+        "email-no-at-sign",
+    ],
+)
+def test_build_id_filter_rejects_invalid_input(guids, emails):
+    # Malformed values containing OData control characters (single quotes,
+    # parentheses, etc.) must be rejected. Without validation, these would be
+    # interpolated verbatim and could break or alter the $filter expression.
+    with pytest.raises(ValueError):
+        _build_id_filter(guids, emails)
 
 
 # ---------------------------------------------------------------------------

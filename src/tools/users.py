@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Annotated
 
 from fastmcp import FastMCP
@@ -24,6 +25,19 @@ users_router = FastMCP("users")
 # Docs: https://learn.microsoft.com/en-us/graph/api/user-list
 _MAX_FILTER_LEN = 2048
 
+# Standard UUID format: 8-4-4-4-12 hex digits. Without this, a value
+# containing OData control characters (e.g. single quotes) could break or
+# alter the $filter expression.
+# Docs: https://datatracker.ietf.org/doc/html/rfc4122
+_GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
+
+# UPN / email: local part @ domain. Rejects OData control characters (single
+# quotes, whitespace, parentheses) that could break or alter the $filter
+# expression. Intentionally permissive on valid chars — the server will reject
+# truly invalid addresses anyway.
+# Docs: https://learn.microsoft.com/en-us/entra/identity/users/groups-dynamic-membership#rules-for-devices
+_EMAIL_RE = re.compile(r"^[^'\s()@]+@[^'\s()@]+$")
+
 
 def _build_id_filter(guids: list[str] | None, emails: list[str] | None) -> str:
     """Build an OData $filter expression for id and userPrincipalName lookups.
@@ -37,6 +51,8 @@ def _build_id_filter(guids: list[str] | None, emails: list[str] | None) -> str:
     sep = " or "
 
     for guid in (guids or []):
+        if not _GUID_RE.match(guid):
+            raise ValueError(f"Invalid GUID format: {guid!r}")
         clause = f"id eq '{guid}'"
         needed = len(clause) + (len(sep) if clauses else 0)
         if sum(len(c) for c in clauses) + len(sep) * max(len(clauses) - 1, 0) + needed > _MAX_FILTER_LEN:
@@ -44,6 +60,8 @@ def _build_id_filter(guids: list[str] | None, emails: list[str] | None) -> str:
         clauses.append(clause)
 
     for email in (emails or []):
+        if not _EMAIL_RE.match(email):
+            raise ValueError(f"Invalid email format: {email!r}")
         clause = f"userPrincipalName eq '{email}'"
         needed = len(clause) + (len(sep) if clauses else 0)
         if sum(len(c) for c in clauses) + len(sep) * max(len(clauses) - 1, 0) + needed > _MAX_FILTER_LEN:
