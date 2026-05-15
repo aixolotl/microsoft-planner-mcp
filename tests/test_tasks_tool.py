@@ -19,7 +19,6 @@ from src.tools.tasks import (
     list_my_tasks,
     list_tasks,
     update_task,
-    update_task_details,
 )
 
 MODULE = "src.tools.tasks"
@@ -56,20 +55,33 @@ def make_tasks_result(tasks) -> MagicMock:
     return result
 
 
-def make_patching_graph_client(return_value=None, side_effect=None) -> MagicMock:
+def make_patching_graph_client(return_value=None, side_effect=None, details_return_value=None, details_side_effect=None) -> MagicMock:
     """Build a mock graph_client whose task/details builders return the given value.
 
     The real PlannerService is instantiated by the tool (not mocked), so we
     configure the graph_client's SDK builders to return the desired result.
+    details_return_value / details_side_effect control the details PATCH.
+    When details_return_value is not explicitly provided it falls back to
+    return_value for backwards compatibility with existing tests.
     """
     client = MagicMock()
     # task-level PATCH
     client.planner.tasks.by_planner_task_id.return_value.patch = AsyncMock(
         return_value=return_value, side_effect=side_effect
     )
-    # task details PATCH
+    # task details PATCH — falls back to the top-level return_value when
+    # no details-specific value is provided, matching legacy behaviour.
     client.planner.tasks.by_planner_task_id.return_value.details.patch = AsyncMock(
-        return_value=return_value, side_effect=side_effect
+        return_value=details_return_value if details_return_value is not None else return_value,
+        side_effect=details_side_effect if details_side_effect is not None else side_effect,
+    )
+    # task details GET — needed for auto-refresh of etag_details when not
+    # provided by the caller. Returns an object with an @odata.etag in
+    # additional_data so svc.refresh_etag() succeeds.
+    _details_get_obj = MagicMock()
+    _details_get_obj.additional_data = {"@odata.etag": '"auto-details-etag"'}
+    client.planner.tasks.by_planner_task_id.return_value.details.get = AsyncMock(
+        return_value=_details_get_obj
     )
     # task DELETE
     client.planner.tasks.by_planner_task_id.return_value.delete = AsyncMock(return_value=None)
@@ -111,11 +123,11 @@ def make_plan_capturing_client() -> tuple[MagicMock, list]:
     lambda: list_my_tasks(),
     lambda: get_task_details("task-1"),
     lambda: update_task("task-1", '"etag-v1"', title="New Title"),
-    lambda: update_task_details("task-1", '"etag-v1"', description="x"),
+    lambda: update_task("task-1", '"etag-v1"', description="x"),
     lambda: delete_task("task-1", '"etag-v1"'),
     lambda: list_tasks("plan-1"),
     lambda: create_task("plan-1", "bucket-1", "My Task"),
-], ids=["list-my-tasks", "get-task-details", "update-task", "update-task-details", "delete-task", "list-tasks", "create-task"])
+], ids=["list-my-tasks", "get-task-details", "update-task", "update-task-details-fields", "delete-task", "list-tasks", "create-task"])
 async def test_no_token_raises(coro_fn):
     with patch(f"{MODULE}.get_access_token", return_value=None):
         with pytest.raises(AuthorizationError):
@@ -333,16 +345,21 @@ async def test_update_task_no_fields_sends_empty_body(graph_ctx):
 
 
 # ---------------------------------------------------------------------------
-# update_task_details
+# update_task — detail fields (description, checklist, references)
 # ---------------------------------------------------------------------------
+# These tests verify the detail-field path of the consolidated update_task
+# tool, which replaced the former update_task_details tool. Detail fields
+# are updated via a separate PlannerTaskDetails PATCH within the same call.
 
 
 async def test_update_task_details_returns_updated_details(graph_ctx):
+    """When only detail fields are provided, update_task patches the details
+    resource and returns the details result directly."""
     updated = make_details("new desc")
-    graph_client = make_patching_graph_client(return_value=updated)
+    graph_client = make_patching_graph_client(details_return_value=updated)
 
     with graph_ctx(MODULE, graph_client):
-        result = await update_task_details("task-1", '"etag-v1"', description="new desc")
+        result = await update_task("task-1", '"etag-v1"', description="new desc", etag_details='"details-etag-v1"')
 
     assert result is updated
     graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.assert_awaited_once()
@@ -351,12 +368,12 @@ async def test_update_task_details_returns_updated_details(graph_ctx):
 
 
 async def test_update_task_details_sets_checklist_and_references(graph_ctx):
-    graph_client = make_patching_graph_client(return_value=make_details())
+    graph_client = make_patching_graph_client(details_return_value=make_details())
     checklist = {"guid-1": {"@odata.type": "microsoft.graph.plannerChecklistItem", "title": "Step 1", "isChecked": False}}
     refs = {"https%3A//example%2Ecom": {"@odata.type": "microsoft.graph.plannerExternalReference", "alias": "Ref"}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task_details("task-1", '"etag-v1"', checklist_items=checklist, references=refs)
+        await update_task("task-1", '"etag-v1"', checklist_items=checklist, references=refs, etag_details='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert body.checklist.additional_data == checklist
@@ -368,13 +385,13 @@ async def test_update_task_details_auto_injects_odata_type(graph_ctx):
     tool injects them automatically when missing. Without auto-injection,
     Graph returns 400: 'The given untyped value … is invalid.'
     Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update"""
-    graph_client = make_patching_graph_client(return_value=make_details())
+    graph_client = make_patching_graph_client(details_return_value=make_details())
     # Deliberately omit @odata.type from both checklist items and references.
     checklist = {"guid-1": {"title": "Step 1", "isChecked": False}}
     refs = {"https%3A//example%2Ecom": {"alias": "Ref"}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task_details("task-1", '"etag-v1"', checklist_items=checklist, references=refs)
+        await update_task("task-1", '"etag-v1"', checklist_items=checklist, references=refs, etag_details='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert body.checklist.additional_data["guid-1"]["@odata.type"] == "microsoft.graph.plannerChecklistItem"
@@ -383,11 +400,11 @@ async def test_update_task_details_auto_injects_odata_type(graph_ctx):
 
 async def test_update_task_details_preserves_explicit_odata_type(graph_ctx):
     """When callers already provide @odata.type, the tool must not overwrite it."""
-    graph_client = make_patching_graph_client(return_value=make_details())
+    graph_client = make_patching_graph_client(details_return_value=make_details())
     checklist = {"guid-1": {"@odata.type": "#microsoft.graph.plannerChecklistItem", "title": "Step 1", "isChecked": False}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task_details("task-1", '"etag-v1"', checklist_items=checklist)
+        await update_task("task-1", '"etag-v1"', checklist_items=checklist, etag_details='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     # The explicit #-prefixed type must be preserved, not replaced with the un-prefixed default.
@@ -397,11 +414,11 @@ async def test_update_task_details_preserves_explicit_odata_type(graph_ctx):
 async def test_update_task_details_null_delete_entries_unaffected(graph_ctx):
     """Null values (used to delete a checklist item or reference) must pass
     through without modification — they are not dicts and have no @odata.type."""
-    graph_client = make_patching_graph_client(return_value=make_details())
+    graph_client = make_patching_graph_client(details_return_value=make_details())
     checklist = {"guid-to-delete": None, "guid-keep": {"title": "Keep", "isChecked": False}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task_details("task-1", '"etag-v1"', checklist_items=checklist)
+        await update_task("task-1", '"etag-v1"', checklist_items=checklist, etag_details='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert body.checklist.additional_data["guid-to-delete"] is None
@@ -411,12 +428,12 @@ async def test_update_task_details_null_delete_entries_unaffected(graph_ctx):
 async def test_update_task_details_does_not_mutate_caller_dicts(graph_ctx):
     """The tool copies dicts before injecting @odata.type. Without the copy,
     callers that reuse the dict would see unexpected extra keys."""
-    graph_client = make_patching_graph_client(return_value=make_details())
+    graph_client = make_patching_graph_client(details_return_value=make_details())
     checklist = {"guid-1": {"title": "Step 1", "isChecked": False}}
     refs = {"https%3A//example%2Ecom": {"alias": "Ref"}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task_details("task-1", '"etag-v1"', checklist_items=checklist, references=refs)
+        await update_task("task-1", '"etag-v1"', checklist_items=checklist, references=refs, etag_details='"details-etag-v1"')
 
     # Caller's original dicts must not have @odata.type injected into them.
     assert "@odata.type" not in checklist["guid-1"]
@@ -434,11 +451,11 @@ async def test_update_task_details_encodes_reference_keys(raw_key, expected_key,
     LLM callers typically send raw URLs; the tool encodes them automatically.
     Already-encoded keys must pass through unchanged (idempotent).
     Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update"""
-    graph_client = make_patching_graph_client(return_value=make_details())
+    graph_client = make_patching_graph_client(details_return_value=make_details())
     refs = {raw_key: {"alias": "Test"}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task_details("task-1", '"etag-v1"', references=refs)
+        await update_task("task-1", '"etag-v1"', references=refs, etag_details='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert expected_key in body.references.additional_data
@@ -451,10 +468,10 @@ async def test_update_task_details_sets_preview_type(preview_type, graph_ctx):
     """All five documented previewType values must be accepted and forwarded."""
     from msgraph.generated.models.planner_preview_type import PlannerPreviewType
 
-    graph_client = make_patching_graph_client(return_value=make_details())
+    graph_client = make_patching_graph_client(details_return_value=make_details())
 
     with graph_ctx(MODULE, graph_client):
-        await update_task_details("task-1", '"etag-v1"', preview_type=preview_type)
+        await update_task("task-1", '"etag-v1"', preview_type=preview_type, etag_details='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert body.preview_type == PlannerPreviewType(preview_type)
@@ -462,11 +479,11 @@ async def test_update_task_details_sets_preview_type(preview_type, graph_ctx):
 
 async def test_update_task_details_invalid_preview_type_raises(graph_ctx):
     """An invalid previewType value must raise ValueError, not silently pass through."""
-    graph_client = make_patching_graph_client(return_value=make_details())
+    graph_client = make_patching_graph_client(details_return_value=make_details())
 
     with graph_ctx(MODULE, graph_client):
         with pytest.raises(ValueError):
-            await update_task_details("task-1", '"etag-v1"', preview_type="invalid")
+            await update_task("task-1", '"etag-v1"', preview_type="invalid", etag_details='"details-etag-v1"')
 
 
 @pytest.mark.parametrize("status,code", [
@@ -474,11 +491,85 @@ async def test_update_task_details_invalid_preview_type_raises(graph_ctx):
     (400, "BadRequest"),
 ], ids=["403-forbidden", "400-bad-request"])
 async def test_update_task_details_odata_error(status, code, graph_ctx, make_odata_error):
-    graph_client = make_patching_graph_client(side_effect=make_odata_error(status, code))
+    graph_client = make_patching_graph_client(details_side_effect=make_odata_error(status, code))
 
     with graph_ctx(MODULE, graph_client):
         with pytest.raises(RuntimeError, match="Graph API error"):
-            await update_task_details("task-1", '"etag-v1"', description="x")
+            await update_task("task-1", '"etag-v1"', description="x", etag_details='"details-etag-v1"')
+
+
+# ---------------------------------------------------------------------------
+# update_task — etag_details auto-refresh
+# ---------------------------------------------------------------------------
+
+
+async def test_update_task_auto_refreshes_details_etag(graph_ctx):
+    """When etag_details is not provided, update_task auto-refreshes the ETag
+    from the details resource via GET before patching. Without this fallback,
+    callers that only have the task-level ETag would need an extra round-trip.
+    Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update"""
+    updated = make_details("refreshed")
+    graph_client = make_patching_graph_client(details_return_value=updated)
+
+    with graph_ctx(MODULE, graph_client):
+        result = await update_task("task-1", '"etag-v1"', description="refreshed")
+
+    # The details GET should have been called to fetch the current ETag.
+    graph_client.planner.tasks.by_planner_task_id.return_value.details.get.assert_awaited_once()
+    # The details PATCH should have used the auto-refreshed ETag.
+    config = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.kwargs["request_configuration"]
+    assert config.headers.get("if-match") == {'"auto-details-etag"'}
+    assert result is updated
+
+
+async def test_update_task_uses_explicit_details_etag(graph_ctx):
+    """When etag_details is provided, update_task uses it directly without
+    auto-refreshing. This avoids an extra GET round-trip when the caller
+    already has the details ETag from a prior get_task_details call."""
+    updated = make_details("explicit")
+    graph_client = make_patching_graph_client(details_return_value=updated)
+
+    with graph_ctx(MODULE, graph_client):
+        result = await update_task("task-1", '"etag-v1"', description="explicit", etag_details='"my-details-etag"')
+
+    # The details GET should NOT have been called since etag_details was provided.
+    graph_client.planner.tasks.by_planner_task_id.return_value.details.get.assert_not_awaited()
+    # The details PATCH should use the explicitly provided ETag.
+    config = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.kwargs["request_configuration"]
+    assert config.headers.get("if-match") == {'"my-details-etag"'}
+    assert result is updated
+
+
+# ---------------------------------------------------------------------------
+# update_task — combined standard + detail fields
+# ---------------------------------------------------------------------------
+
+
+async def test_update_task_combined_returns_both_results(graph_ctx):
+    """When both standard and detail fields are provided, update_task patches
+    both resources and returns a dict with 'task' and 'details' keys."""
+    updated_task = make_task(title="Updated")
+    updated_details = make_details("new desc")
+    graph_client = make_patching_graph_client(
+        return_value=updated_task,
+        details_return_value=updated_details,
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        result = await update_task(
+            "task-1", '"etag-v1"',
+            title="Updated",
+            description="new desc",
+            etag_details='"details-etag-v1"',
+        )
+
+    # Both PATCHes should have been called.
+    graph_client.planner.tasks.by_planner_task_id.return_value.patch.assert_awaited_once()
+    graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.assert_awaited_once()
+    # Result should be a dict containing both resources.
+    assert isinstance(result, dict)
+    assert result["task"] is updated_task
+    assert result["details"] is updated_details
 
 
 # ---------------------------------------------------------------------------
