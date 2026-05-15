@@ -382,7 +382,7 @@ Create a new task in a Planner plan.
 
 #### `update_task`
 
-Update a task's basic fields. Only provided fields are changed.
+Update a task's standard fields and/or detail fields (description, checklist, references). Only provided fields are changed. When detail fields are specified, a separate API call updates the task details resource automatically.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
@@ -395,23 +395,15 @@ Update a task's basic fields. Only provided fields are changed.
 | `assignee_priority` | string | No | Order hint for sorting within the assignee's task list |
 | `assign_user_ids` | list[string] | No | User IDs to assign |
 | `unassign_user_ids` | list[string] | No | User IDs to remove |
+| `description` | string | No | Plain-text description (up to 2000 characters) — detail field |
+| `preview_type` | string | No | Preview style: `automatic`, `noPreview`, `checklist`, `description`, or `reference` — detail field |
+| `checklist_items` | object | No | Dict keyed by checklist item GUID. Pass `null` for a key to delete that item — detail field |
+| `references` | object | No | Dict keyed by URL-encoded reference URL. Pass `null` for a key to delete that reference — detail field |
+| `etag_details` | string | No | The `@odata.etag` of the task details resource. Required only when updating detail fields; auto-refreshed from Graph if omitted. |
 
-- **Returns:** The updated task object or `null`
+- **Returns:** The updated task object, the updated task details object, or both (`{ "task": ..., "details": ... }`) depending on which fields were provided. Returns `null` if the result is empty.
 
-#### `update_task_details`
-
-Update a task's description, checklist items, and external references.
-
-| Parameter | Type | Required | Description |
-|---|---|---|---|
-| `task_id` | string | Yes | The ID of the task |
-| `etag` | string | Yes | The current `@odata.etag` of the task details resource (retries once if stale) |
-| `description` | string | No | Plain-text description (up to 2000 characters) |
-| `preview_type` | string | No | Preview style: `automatic`, `noPreview`, `checklist`, `description`, or `reference` |
-| `checklist_items` | object | No | Dict keyed by checklist item GUID. Pass `null` for a key to delete that item. |
-| `references` | object | No | Dict keyed by URL-encoded reference URL. Pass `null` for a key to delete that reference. |
-
-- **Returns:** The updated task details object or `null`
+> **Note:** The `update_task_details` tool has been removed. Use `update_task` with detail field parameters (`description`, `checklist_items`, `references`, `preview_type`) instead. The task and details resources have separate ETags — provide `etag_details` when available to avoid an extra round-trip, or omit it to let the tool auto-refresh.
 
 #### `list_task_fields`
 
