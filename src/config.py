@@ -32,8 +32,14 @@ class Settings(BaseSettings):
     # Docs: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
     ALLOWED_ORIGINS: list[str] = ["http://localhost:8000"]
 
+    # FastMCP requires per-client auth consent by default to prevent confused
+    # deputy attacks. Setting this false helps local development with throwaway
+    # clients but removes that extra approval step. Docs:
+    # https://gofastmcp.com/servers/auth/oauth-proxy#param-require-authorization-consent
+    REQUIRE_AUTHORIZATION_CONSENT: bool = True
 
-# CLIENT_SECRET, and TENANT_ID from the environment / .env at runtime, so
-# there are no missing arguments at runtime even though the static type
-# checker cannot verify this without reading the environment itself.
-settings = Settings()  # ty:ignore[missing-argument]
+
+# pydantic-settings reads CLIENT_ID, CLIENT_SECRET, and TENANT_ID from the
+# environment / .env at runtime, so there are no missing arguments even though
+# the static type checker cannot verify environment-derived values itself.
+settings = Settings()  # ty:ignore[call-arg]

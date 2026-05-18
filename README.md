@@ -141,6 +141,9 @@ BASE_URL=http://localhost:8000
 # JSON-encoded list of allowed CORS origins
 # Include http://localhost:6274 if using MCP Inspector for testing
 ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274"]
+
+# Require FastMCP's extra client consent prompt (set false only for local dev)
+REQUIRE_AUTHORIZATION_CONSENT=true
 ```
 
 ## Running the Server
@@ -166,6 +169,7 @@ docker run --rm -i \
   -e CLIENT_SECRET=your_api_token \
   -e TENANT_ID=your_tenant_id \
   -e ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274", "http://localhost:3000"] \
+  -e REQUIRE_AUTHORIZATION_CONSENT=true \
   ghcr.io/aixolotl/microsoft-planner-mcp:latest
 ```
 

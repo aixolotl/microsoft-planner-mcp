@@ -34,4 +34,10 @@ auth = AzureProvider(
         # Docs: https://learn.microsoft.com/en-us/graph/permissions-reference#userreadbasicall
         "https://graph.microsoft.com/User.ReadBasic.All",
     ],
+    # FastMCP defaults this to True to force explicit client approval.
+    # Without a config escape hatch, local development with disposable clients
+    # must repeat that consent flow even when the operator intentionally wants
+    # to disable it. Docs:
+    # https://gofastmcp.com/servers/auth/oauth-proxy#param-require-authorization-consent
+    require_authorization_consent=settings.REQUIRE_AUTHORIZATION_CONSENT,
 )
