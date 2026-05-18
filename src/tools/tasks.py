@@ -356,13 +356,18 @@ async def get_task_details(
 
 @tasks_router.tool(
     name="update_task",
-    description="Update a Planner task's basic fields. All fields are optional — only provided fields are changed.",
+    description=(
+        "Update a Planner task. Supports both standard fields (title, percentComplete, "
+        "bucketId, etc.) and detail fields (description, checklist, references). All "
+        "fields are optional — only provided fields are changed. When detail fields are "
+        "specified, a separate API call updates the task details resource automatically."
+    ),
     tags={"tasks", "write"},
     annotations={"idempotentHint": True},
 )
 async def update_task(
     task_id: Annotated[str, "The ID of the task to update (from list_my_tasks or list_tasks)."],
-    etag: Annotated[str, "The current @odata.etag of the task. Retries once automatically if stale (412/409)."],
+    etag: Annotated[str, "The current @odata.etag of the task resource. Retries once automatically if stale (412/409)."],
     title: Annotated[str | None, "New title for the task."] = None,
     percent_complete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
     due_date_time: Annotated[str | None, "ISO 8601 due date string (e.g. '2026-05-31T00:00:00')."] = None,
@@ -370,114 +375,145 @@ async def update_task(
     assignee_priority: Annotated[str | None, "Order hint string for sorting within the assignee's task list."] = None,
     assign_user_ids: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
     unassign_user_ids: Annotated[list[str] | None, "List of user object IDs to remove from the task."] = None,
+    # --- Detail fields (updated via a separate PlannerTaskDetails PATCH) ---
+    description: Annotated[str | None, "New plain-text description for the task (detail field)."] = None,
+    preview_type: Annotated[str | None, "Preview style shown in Planner UI. One of: automatic, noPreview, checklist, description, reference (detail field)."] = None,
+    checklist_items: Annotated[dict | None, "Dict keyed by checklist item GUID. Pass null for a key to delete that item (detail field)."] = None,
+    references: Annotated[dict | None, "Dict keyed by URL-encoded reference URL (periods to %2E, colons to %3A). Pass null for a key to delete that reference (detail field)."] = None,
+    etag_details: Annotated[
+        str | None,
+        "The current @odata.etag of the task *details* resource (from get_task_details). "
+        "Required only when updating detail fields (description, checklist_items, references, "
+        "preview_type). If omitted the ETag is auto-refreshed from Graph before patching.",
+    ] = None,
 ) -> dict | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
 
-    body = PlannerTask()
-    for attr, value in [
-        ("title", title),
-        ("percent_complete", percent_complete),
-        ("bucket_id", bucket_id),
-        ("assignee_priority", assignee_priority),
-        ("due_date_time", PlannerService.to_utc(due_date_time) if due_date_time is not None else None),
-    ]:
-        if value is not None:
-            setattr(body, attr, value)
-    if assign_user_ids or unassign_user_ids:
-        assignment_data: dict = {
-            user_id: {"@odata.type": "#microsoft.graph.plannerAssignment", "orderHint": " !"}
-            for user_id in (assign_user_ids or [])
-        } | {user_id: None for user_id in (unassign_user_ids or [])}
-        body.assignments = PlannerAssignments(additional_data=assignment_data)
+    # Determine which resource groups have updates so we only make the API
+    # calls that are actually needed. Without this split, every update_task
+    # call would issue two PATCH requests even when only standard fields change.
+    has_standard = any(v is not None for v in [
+        title, percent_complete, due_date_time, bucket_id, assignee_priority,
+        assign_user_ids, unassign_user_ids,
+    ])
+    has_details = any(v is not None for v in [
+        description, preview_type, checklist_items, references,
+    ])
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        item = graph_client.planner.tasks.by_planner_task_id(task_id)
-        result = await svc.with_retry(
-            etag,
-            lambda e: item.patch(body, request_configuration=svc.make_config(e, prefer_representation=True)),
-            lambda: svc.refresh_etag(item.get, f"task {task_id!r}"),
-        )
-        return svc.serialize_graph_object(result) if result else None
 
+        # --- Standard task fields ---
+        task_result = None
+        if has_standard:
+            body = PlannerTask()
+            for attr, value in [
+                ("title", title),
+                ("percent_complete", percent_complete),
+                ("bucket_id", bucket_id),
+                ("assignee_priority", assignee_priority),
+                ("due_date_time", PlannerService.to_utc(due_date_time) if due_date_time is not None else None),
+            ]:
+                if value is not None:
+                    setattr(body, attr, value)
+            if assign_user_ids or unassign_user_ids:
+                assignment_data: dict = {
+                    user_id: {"@odata.type": "#microsoft.graph.plannerAssignment", "orderHint": " !"}
+                    for user_id in (assign_user_ids or [])
+                } | {user_id: None for user_id in (unassign_user_ids or [])}
+                body.assignments = PlannerAssignments(additional_data=assignment_data)
 
-@tasks_router.tool(
-    name="update_task_details",
-    description="Update the details of a Planner task: description, checklist items, and external references.",
-    tags={"tasks", "write"},
-    annotations={"idempotentHint": True},
-)
-async def update_task_details(
-    task_id: Annotated[str, "The ID of the task to update."],
-    etag: Annotated[str, "The current @odata.etag of the task details resource (from get_task_details). Retries once automatically if stale (412/409)."],
-    description: Annotated[str | None, "New plain-text description for the task."] = None,
-    preview_type: Annotated[str | None, "Preview style shown in Planner UI. One of: automatic, noPreview, checklist, description, reference."] = None,
-    checklist_items: Annotated[dict | None, "Dict keyed by checklist item GUID. Pass null for a key to delete that item."] = None,
-    references: Annotated[dict | None, "Dict keyed by URL-encoded reference URL (periods to %2E, colons to %3A). Pass null for a key to delete that reference."] = None,
-) -> dict | None:
-    token = get_access_token()
-    if token is None:
-        raise AuthorizationError("No access token available")
+            item = graph_client.planner.tasks.by_planner_task_id(task_id)
+            task_result = await svc.with_retry(
+                etag,
+                lambda e: item.patch(body, request_configuration=svc.make_config(e, prefer_representation=True)),
+                lambda: svc.refresh_etag(item.get, f"task {task_id!r}"),
+            )
 
-    ctx = get_optional_context()
+        # --- Detail fields (description, checklist, references, previewType) ---
+        details_result = None
+        if has_details:
+            details_body = PlannerTaskDetails()
+            if description is not None:
+                details_body.description = description
+            if preview_type is not None:
+                # PlannerPreviewType is a str enum — look up by value (case-sensitive).
+                # Without this, callers would need to know the Python enum member name.
+                # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
+                details_body.preview_type = PlannerPreviewType(preview_type)
+            if checklist_items is not None:
+                # Copy to avoid mutating the caller's dict when injecting @odata.type.
+                # Without the copy, callers that reuse the dict would see unexpected
+                # side effects (extra keys added silently).
+                checklist_items = {k: ({**v} if isinstance(v, dict) else v) for k, v in checklist_items.items()}
+                # The Graph Planner API requires @odata.type on every checklist item
+                # in the PATCH body. Without it, Graph returns 400: "The given untyped
+                # value … is invalid. Consider using a OData type annotation explicitly."
+                # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
+                for value in checklist_items.values():
+                    if isinstance(value, dict) and "@odata.type" not in value:
+                        value["@odata.type"] = "microsoft.graph.plannerChecklistItem"
+                details_body.checklist = PlannerChecklistItems(additional_data=checklist_items)
+            if references is not None:
+                # Graph Planner requires reference keys to encode only ":" → %3A and
+                # "." → %2E. Slashes and other URL characters stay literal — the docs
+                # example shows "http%3A//developer%2Emicrosoft%2Ecom", NOT full
+                # percent-encoding.
+                # unquote() first normalises pre-encoded keys (e.g. "https%3A//…")
+                # back to raw form so the subsequent replace is idempotent — callers
+                # can send raw or pre-encoded URLs and get the same result.
+                # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
+                references = {
+                    unquote(k).replace(":", "%3A").replace(".", "%2E"): ({**v} if isinstance(v, dict) else v)
+                    for k, v in references.items()
+                }
+                # Same requirement for external references — each needs @odata.type.
+                # Without it, Graph returns 400. Null values (used to delete a ref)
+                # are skipped since they carry no properties.
+                # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
+                for value in references.values():
+                    if isinstance(value, dict) and "@odata.type" not in value:
+                        value["@odata.type"] = "microsoft.graph.plannerExternalReference"
+                details_body.references = PlannerExternalReferences(additional_data=references)
 
-    if ctx is not None:
-        await ctx.info(f"Updating details for task {task_id}")
+            details_item = graph_client.planner.tasks.by_planner_task_id(task_id).details
+            # When etag_details is not provided, auto-refresh from Graph so the
+            # update works even without a prior get_task_details call. Without
+            # this fallback, callers that only have the task-level ETag would
+            # need an extra round-trip to fetch the details ETag manually.
+            # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
+            resolved_etag = etag_details or await svc.refresh_etag(
+                details_item.get, f"task details {task_id!r}"
+            )
+            details_result = await svc.with_retry(
+                resolved_etag,
+                lambda e: details_item.patch(details_body, request_configuration=svc.make_config(e, prefer_representation=True)),
+                lambda: svc.refresh_etag(details_item.get, f"task details {task_id!r}"),
+            )
 
-    body = PlannerTaskDetails()
-    if description is not None:
-        body.description = description
-    if preview_type is not None:
-        # PlannerPreviewType is a str enum — look up by value (case-sensitive).
-        # Without this, callers would need to know the Python enum member name.
-        # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
-        body.preview_type = PlannerPreviewType(preview_type)
-    if checklist_items is not None:
-        # Copy to avoid mutating the caller's dict when injecting @odata.type.
-        # Without the copy, callers that reuse the dict would see unexpected
-        # side effects (extra keys added silently).
-        checklist_items = {k: ({**v} if isinstance(v, dict) else v) for k, v in checklist_items.items()}
-        # The Graph Planner API requires @odata.type on every checklist item
-        # in the PATCH body. Without it, Graph returns 400: "The given untyped
-        # value … is invalid. Consider using a OData type annotation explicitly."
-        # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
-        for value in checklist_items.values():
-            if isinstance(value, dict) and "@odata.type" not in value:
-                value["@odata.type"] = "microsoft.graph.plannerChecklistItem"
-        body.checklist = PlannerChecklistItems(additional_data=checklist_items)
-    if references is not None:
-        # Graph Planner requires reference keys to encode only ":" → %3A and
-        # "." → %2E. Slashes and other URL characters stay literal — the docs
-        # example shows "http%3A//developer%2Emicrosoft%2Ecom", NOT full
-        # percent-encoding.
-        # unquote() first normalises pre-encoded keys (e.g. "https%3A//…")
-        # back to raw form so the subsequent replace is idempotent — callers
-        # can send raw or pre-encoded URLs and get the same result.
-        # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
-        references = {
-            unquote(k).replace(":", "%3A").replace(".", "%2E"): ({**v} if isinstance(v, dict) else v)
-            for k, v in references.items()
-        }
-        # Same requirement for external references — each needs @odata.type.
-        # Without it, Graph returns 400. Null values (used to delete a ref)
-        # are skipped since they carry no properties.
-        # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
-        for value in references.values():
-            if isinstance(value, dict) and "@odata.type" not in value:
-                value["@odata.type"] = "microsoft.graph.plannerExternalReference"
-        body.references = PlannerExternalReferences(additional_data=references)
-
-    async with graph_client_manager.for_user(token.token) as graph_client:
-        svc = PlannerService(graph_client)
-        item = graph_client.planner.tasks.by_planner_task_id(task_id).details
-        result = await svc.with_retry(
-            etag,
-            lambda e: item.patch(body, request_configuration=svc.make_config(e, prefer_representation=True)),
-            lambda: svc.refresh_etag(item.get, f"task details {task_id!r}"),
-        )
-        return svc.serialize_graph_object(result) if result else None
+        # Return both results when both resources were updated so the caller
+        # can see the full state. When only one resource changed, return that.
+        # When neither changed (no fields provided), patch the task with an
+        # empty body to match the previous behaviour.
+        if has_standard and has_details:
+            return {
+                "task": svc.serialize_graph_object(task_result) if task_result else None,
+                "details": svc.serialize_graph_object(details_result) if details_result else None,
+            }
+        if has_details:
+            return svc.serialize_graph_object(details_result) if details_result else None
+        if not has_standard:
+            # No fields provided at all — send an empty PATCH like before.
+            body = PlannerTask()
+            item = graph_client.planner.tasks.by_planner_task_id(task_id)
+            task_result = await svc.with_retry(
+                etag,
+                lambda e: item.patch(body, request_configuration=svc.make_config(e, prefer_representation=True)),
+                lambda: svc.refresh_etag(item.get, f"task {task_id!r}"),
+            )
+        return svc.serialize_graph_object(task_result) if task_result else None
 
 
 @tasks_router.tool(
