@@ -70,6 +70,7 @@ An Azure app registration is required so the server can authenticate users and c
 2. Add these permissions:
    - `Tasks.ReadWrite` — read and write Planner tasks
    - `User.Read` — read the signed-in user's profile
+   - `User.ReadBasic.All` — resolve user display names from the GUIDs in task assignments (required only for `list_users` tool)
 3. Click **Grant admin consent** for your organisation
 
 ### Step 3 — Expose an API Scope
@@ -140,6 +141,9 @@ BASE_URL=http://localhost:8000
 # JSON-encoded list of allowed CORS origins
 # Include http://localhost:6274 if using MCP Inspector for testing
 ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274"]
+
+# Require FastMCP's extra client consent prompt (set false only for local dev)
+REQUIRE_AUTHORIZATION_CONSENT=true
 ```
 
 ## Running the Server
@@ -165,6 +169,7 @@ docker run --rm -i \
   -e CLIENT_SECRET=your_api_token \
   -e TENANT_ID=your_tenant_id \
   -e ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274", "http://localhost:3000"] \
+  -e REQUIRE_AUTHORIZATION_CONSENT=true \
   ghcr.io/aixolotl/microsoft-planner-mcp:latest
 ```
 
@@ -219,6 +224,22 @@ Return the authenticated user's profile from Microsoft Graph.
 
 - **Parameters:** None
 - **Returns:** User profile object (id, displayName, mail, etc.) or `null`
+
+#### `list_users`
+
+Retrieve Microsoft 365 users by GUID, e-mail address, or free-text search. Useful for resolving the user GUIDs returned in task assignment objects to display names.
+
+| Parameter | Type | Required | Description |
+|---|---|---|---|
+| `select` | string | No | Comma-separated fields to include (default: `id,displayName,mail,userPrincipalName`). Pass `*all` for all fields. |
+| `search` | string | No | Free text search on display name, or search by field name and value, e.g. `Alice` or `surname:Smith` |
+| `guids` | list[string] | No | User object GUIDs to look up. Translated to an OData `$filter` expression. |
+| `emails` | list[string] | No | User principal names (UPNs / e-mail addresses) to look up. Translated to an OData `$filter` expression. |
+| `top` | integer | No | Maximum number of users to return (default: `10`). Ignored when `guids` or `emails` are provided. |
+
+- **Returns:** List of user objects or `null`
+
+> **Note:** When both `guids`/`emails` and `search` are supplied, the GUID/email filter takes priority. Very large lists of GUIDs or e-mail addresses are silently truncated to stay within the 2 048-character Graph URL limit.
 
 ### Groups
 

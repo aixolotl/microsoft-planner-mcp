@@ -28,5 +28,16 @@ auth = AzureProvider(
     additional_authorize_scopes=[
         "https://graph.microsoft.com/Tasks.ReadWrite",
         "https://graph.microsoft.com/User.Read",
+        # Required by the list_users tool to resolve user display names from the
+        # GUIDs that appear in task assignment objects. Without this scope, Graph
+        # returns 403 Forbidden for /users and /users?$filter=id eq '...' calls.
+        # Docs: https://learn.microsoft.com/en-us/graph/permissions-reference#userreadbasicall
+        "https://graph.microsoft.com/User.ReadBasic.All",
     ],
+    # FastMCP defaults this to True to force explicit client approval.
+    # Without a config escape hatch, local development with disposable clients
+    # must repeat that consent flow even when the operator intentionally wants
+    # to disable it. Docs:
+    # https://gofastmcp.com/servers/auth/oauth-proxy#param-require-authorization-consent
+    require_authorization_consent=settings.REQUIRE_AUTHORIZATION_CONSENT,
 )
