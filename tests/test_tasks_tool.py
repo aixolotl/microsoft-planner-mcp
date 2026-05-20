@@ -742,7 +742,9 @@ async def test_create_task_raises_when_start_after_due(graph_ctx):
     with graph_ctx(MODULE, MagicMock()):
         with pytest.raises(ValueError, match="must not be after"):
             await create_task(
-                "plan-1", "bucket-1", "Task",
+                planId="plan-1",
+                bucketId="bucket-1",
+                title="Task",
                 startDateTime="2026-06-01T00:00:00",
                 dueDateTime="2026-05-01T00:00:00",
             )
