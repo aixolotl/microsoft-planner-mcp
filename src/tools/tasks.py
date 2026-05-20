@@ -10,6 +10,7 @@ from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
+from msgraph.generated.models.planner_applied_categories import PlannerAppliedCategories
 from msgraph.generated.models.planner_assignments import PlannerAssignments
 from msgraph.generated.models.planner_checklist_items import PlannerChecklistItems
 from msgraph.generated.models.planner_external_references import PlannerExternalReferences
@@ -372,7 +373,9 @@ async def update_task(
     percentComplete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
     dueDateTime: Annotated[str | None, "ISO 8601 due date string (e.g. '2026-05-31T00:00:00')."] = None,
     bucketId: Annotated[str | None, "ID of the bucket to move the task to."] = None,
+    priority: Annotated[int, Field(description="Priority 0 (urgent)–10 (low). Planner maps: 1=urgent, 3=important, 5=medium, 9=low.", ge=0, le=10)] | None = None,
     assigneePriority: Annotated[str | None, "Order hint string for sorting within the assignee's task list."] = None,
+    appliedCategories: Annotated[dict | None, "Categories applied to the task keyed by category slot (e.g. {\"category3\": true, \"category4\": false}). Use list_plan_categories for label names."] = None,
     assignUserIds: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
     unassignUserIds: Annotated[list[str] | None, "List of user object IDs to remove from the task."] = None,
     # --- Detail fields (updated via a separate PlannerTaskDetails PATCH) ---
@@ -395,8 +398,8 @@ async def update_task(
     # calls that are actually needed. Without this split, every update_task
     # call would issue two PATCH requests even when only standard fields change.
     has_standard = any(v is not None for v in [
-        title, percentComplete, dueDateTime, bucketId, assigneePriority,
-        assignUserIds, unassignUserIds,
+        title, percentComplete, dueDateTime, bucketId, priority,
+        assigneePriority, appliedCategories, assignUserIds, unassignUserIds,
     ])
     has_details = any(v is not None for v in [
         description, previewType, checklistItems, references,
@@ -412,12 +415,17 @@ async def update_task(
             for attr, value in [
                 ("title", title),
                 ("percent_complete", percentComplete),
+                ("priority", priority),
                 ("bucket_id", bucketId),
                 ("assignee_priority", assigneePriority),
                 ("due_date_time", PlannerService.to_utc(dueDateTime) if dueDateTime is not None else None),
             ]:
                 if value is not None:
                     setattr(body, attr, value)
+            if appliedCategories is not None:
+                body.applied_categories = PlannerAppliedCategories(
+                    additional_data=appliedCategories
+                )
             if assignUserIds or unassignUserIds:
                 assignment_data: dict = {
                     user_id: {"@odata.type": "#microsoft.graph.plannerAssignment", "orderHint": " !"}

@@ -291,9 +291,10 @@ async def test_update_task_returns_updated_task(graph_ctx):
 
 @pytest.mark.parametrize("field,value,attr", [
     ("percentComplete", 50, "percent_complete"),
+    ("priority", 3, "priority"),
     ("bucketId", "bucket-abc", "bucket_id"),
     ("assigneePriority", "8585!", "assignee_priority"),
-], ids=["percent-complete", "bucket-id", "assignee-priority"])
+], ids=["percent-complete", "priority", "bucket-id", "assignee-priority"])
 async def test_update_task_sets_scalar_fields(field, value, attr, graph_ctx):
     graph_client = make_patching_graph_client(return_value=make_task())
 
@@ -330,6 +331,17 @@ async def test_update_task_assign_users_builds_correct_additional_data(graph_ctx
         "orderHint": " !",
     }
     assert body.assignments.additional_data["user-b"] is None
+
+
+async def test_update_task_applied_categories_builds_additional_data(graph_ctx):
+    graph_client = make_patching_graph_client(return_value=make_task())
+    categories = {"category3": True, "category5": True}
+
+    with graph_ctx(MODULE, graph_client):
+        await update_task("task-1", '"etag-v1"', appliedCategories=categories)
+
+    body = graph_client.planner.tasks.by_planner_task_id.return_value.patch.call_args.args[0]
+    assert body.applied_categories.additional_data == categories
 
 
 async def test_update_task_no_fields_sends_empty_body(graph_ctx):
