@@ -44,7 +44,7 @@ mcp = FastMCP(
         "Authenticate with your Microsoft account to read and manage Planner tasks."
     ),
     mask_error_details=True,
-    version="1.0.0",
+    version="0.3.0",
     # Forward ctx.info() / ctx.debug() log messages to MCP clients at INFO
     # level and above. Without this, tool-level ctx.info() calls are silently
     # suppressed even though the tools emit them. Clients (Claude, MCP

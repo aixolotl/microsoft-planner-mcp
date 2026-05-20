@@ -25,7 +25,7 @@ buckets_router = FastMCP("buckets")
     annotations={"readOnlyHint": True},
 )
 async def list_buckets(
-    plan_id: Annotated[str, "The ID of the plan to list buckets for (from list_my_plans or list_group_plans)."],
+    planId: Annotated[str, "The ID of the plan to list buckets for (from list_my_plans or list_group_plans)."],
 ) -> list[dict] | None:
     token = get_access_token()
     if token is None:
@@ -34,7 +34,7 @@ async def list_buckets(
     ctx = get_optional_context()
 
     if ctx is not None:
-        await ctx.info(f"Fetching buckets for plan {plan_id}")
+        await ctx.info(f"Fetching buckets for plan {planId}")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
@@ -45,12 +45,12 @@ async def list_buckets(
         # via PageIterator and returns a flat list.
         # Docs: https://learn.microsoft.com/en-us/graph/paging
         try:
-            buckets = await PlannerService.paginate(graph_client.planner.plans.by_planner_plan_id(plan_id).buckets)
+            buckets = await PlannerService.paginate(graph_client.planner.plans.by_planner_plan_id(planId).buckets)
         except ODataError as exc:
             raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
     if ctx is not None:
-        await ctx.info(f"Found {len(buckets)} bucket(s) in plan {plan_id}")
+        await ctx.info(f"Found {len(buckets)} bucket(s) in plan {planId}")
 
     return svc.serialize_graph_list(buckets) if buckets else None
 
@@ -61,7 +61,7 @@ async def list_buckets(
     tags={"buckets", "write"},
 )
 async def create_bucket(
-    plan_id: Annotated[str, "The ID of the plan to create the bucket in (from list_my_plans or list_group_plans)."],
+    planId: Annotated[str, "The ID of the plan to create the bucket in (from list_my_plans or list_group_plans)."],
     name: Annotated[str, "The display name for the new bucket."],
 ) -> dict | None:
     token = get_access_token()
@@ -71,10 +71,10 @@ async def create_bucket(
     ctx = get_optional_context()
 
     if ctx is not None:
-        await ctx.info(f"Creating bucket '{name}' in plan {plan_id}")
+        await ctx.info(f"Creating bucket '{name}' in plan {planId}")
 
     body = PlannerBucket()
-    body.plan_id = plan_id
+    body.plan_id = planId
     body.name = name
     # orderHint " !" is the Graph API sentinel meaning "place first in order".
     # Without an orderHint, Graph rejects the POST with 400 Bad Request.
@@ -103,7 +103,7 @@ async def create_bucket(
     annotations={"destructiveHint": True},
 )
 async def delete_bucket(
-    bucket_id: Annotated[str, "The ID of the bucket to delete (from list_buckets)."],
+    bucketId: Annotated[str, "The ID of the bucket to delete (from list_buckets)."],
     etag: Annotated[str, "The current @odata.etag of the bucket. Retries once automatically if stale (412/409)."],
 ) -> str:
     token = get_access_token()
@@ -112,10 +112,10 @@ async def delete_bucket(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        item = graph_client.planner.buckets.by_planner_bucket_id(bucket_id)
+        item = graph_client.planner.buckets.by_planner_bucket_id(bucketId)
         await svc.with_retry(
             etag,
             lambda e: item.delete(request_configuration=svc.make_config(e)),
-            lambda: svc.refresh_etag(item.get, f"bucket {bucket_id!r}"),
+            lambda: svc.refresh_etag(item.get, f"bucket {bucketId!r}"),
         )
-    return f"Deleted bucket {bucket_id!r}."
+    return f"Deleted bucket {bucketId!r}."
