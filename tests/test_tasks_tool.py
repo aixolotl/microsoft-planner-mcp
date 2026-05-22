@@ -75,7 +75,7 @@ def make_patching_graph_client(return_value=None, side_effect=None, details_retu
         return_value=details_return_value if details_return_value is not None else return_value,
         side_effect=details_side_effect if details_side_effect is not None else side_effect,
     )
-    # task details GET — needed for auto-refresh of etag_details when not
+    # task details GET — needed for auto-refresh of etagDetails when not
     # provided by the caller. Returns an object with an @odata.etag in
     # additional_data so svc.refresh_etag() succeeds.
     _details_get_obj = MagicMock()
@@ -290,10 +290,11 @@ async def test_update_task_returns_updated_task(graph_ctx):
 
 
 @pytest.mark.parametrize("field,value,attr", [
-    ("percent_complete", 50, "percent_complete"),
-    ("bucket_id", "bucket-abc", "bucket_id"),
-    ("assignee_priority", "8585!", "assignee_priority"),
-], ids=["percent-complete", "bucket-id", "assignee-priority"])
+    ("percentComplete", 50, "percent_complete"),
+    ("priority", 3, "priority"),
+    ("bucketId", "bucket-abc", "bucket_id"),
+    ("assigneePriority", "8585!", "assignee_priority"),
+], ids=["percent-complete", "priority", "bucket-id", "assignee-priority"])
 async def test_update_task_sets_scalar_fields(field, value, attr, graph_ctx):
     graph_client = make_patching_graph_client(return_value=make_task())
 
@@ -312,7 +313,7 @@ async def test_update_task_converts_due_date_to_utc(due_str, expected_utc, graph
     graph_client = make_patching_graph_client(return_value=make_task())
 
     with graph_ctx(MODULE, graph_client):
-        await update_task("task-1", '"etag-v1"', due_date_time=due_str)
+        await update_task("task-1", '"etag-v1"', dueDateTime=due_str)
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.patch.call_args.args[0]
     assert body.due_date_time == expected_utc
@@ -322,7 +323,7 @@ async def test_update_task_assign_users_builds_correct_additional_data(graph_ctx
     graph_client = make_patching_graph_client(return_value=make_task())
 
     with graph_ctx(MODULE, graph_client):
-        await update_task("task-1", '"etag-v1"', assign_user_ids=["user-a"], unassign_user_ids=["user-b"])
+        await update_task("task-1", '"etag-v1"', assignUserIds=["user-a"], unassignUserIds=["user-b"])
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.patch.call_args.args[0]
     assert body.assignments.additional_data["user-a"] == {
@@ -330,6 +331,17 @@ async def test_update_task_assign_users_builds_correct_additional_data(graph_ctx
         "orderHint": " !",
     }
     assert body.assignments.additional_data["user-b"] is None
+
+
+async def test_update_task_applied_categories_builds_additional_data(graph_ctx):
+    graph_client = make_patching_graph_client(return_value=make_task())
+    categories = {"category3": True, "category5": True}
+
+    with graph_ctx(MODULE, graph_client):
+        await update_task("task-1", '"etag-v1"', appliedCategories=categories)
+
+    body = graph_client.planner.tasks.by_planner_task_id.return_value.patch.call_args.args[0]
+    assert body.applied_categories.additional_data == categories
 
 
 async def test_update_task_no_fields_sends_empty_body(graph_ctx):
@@ -359,7 +371,7 @@ async def test_update_task_details_returns_updated_details(graph_ctx):
     graph_client = make_patching_graph_client(details_return_value=updated)
 
     with graph_ctx(MODULE, graph_client):
-        result = await update_task("task-1", '"etag-v1"', description="new desc", etag_details='"details-etag-v1"')
+        result = await update_task("task-1", '"etag-v1"', description="new desc", etagDetails='"details-etag-v1"')
 
     assert result is updated
     graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.assert_awaited_once()
@@ -373,7 +385,7 @@ async def test_update_task_details_sets_checklist_and_references(graph_ctx):
     refs = {"https%3A//example%2Ecom": {"@odata.type": "microsoft.graph.plannerExternalReference", "alias": "Ref"}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task("task-1", '"etag-v1"', checklist_items=checklist, references=refs, etag_details='"details-etag-v1"')
+        await update_task("task-1", '"etag-v1"', checklistItems=checklist, references=refs, etagDetails='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert body.checklist.additional_data == checklist
@@ -391,7 +403,7 @@ async def test_update_task_details_auto_injects_odata_type(graph_ctx):
     refs = {"https%3A//example%2Ecom": {"alias": "Ref"}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task("task-1", '"etag-v1"', checklist_items=checklist, references=refs, etag_details='"details-etag-v1"')
+        await update_task("task-1", '"etag-v1"', checklistItems=checklist, references=refs, etagDetails='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert body.checklist.additional_data["guid-1"]["@odata.type"] == "microsoft.graph.plannerChecklistItem"
@@ -404,7 +416,7 @@ async def test_update_task_details_preserves_explicit_odata_type(graph_ctx):
     checklist = {"guid-1": {"@odata.type": "#microsoft.graph.plannerChecklistItem", "title": "Step 1", "isChecked": False}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task("task-1", '"etag-v1"', checklist_items=checklist, etag_details='"details-etag-v1"')
+        await update_task("task-1", '"etag-v1"', checklistItems=checklist, etagDetails='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     # The explicit #-prefixed type must be preserved, not replaced with the un-prefixed default.
@@ -418,7 +430,7 @@ async def test_update_task_details_null_delete_entries_unaffected(graph_ctx):
     checklist = {"guid-to-delete": None, "guid-keep": {"title": "Keep", "isChecked": False}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task("task-1", '"etag-v1"', checklist_items=checklist, etag_details='"details-etag-v1"')
+        await update_task("task-1", '"etag-v1"', checklistItems=checklist, etagDetails='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert body.checklist.additional_data["guid-to-delete"] is None
@@ -433,7 +445,7 @@ async def test_update_task_details_does_not_mutate_caller_dicts(graph_ctx):
     refs = {"https%3A//example%2Ecom": {"alias": "Ref"}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task("task-1", '"etag-v1"', checklist_items=checklist, references=refs, etag_details='"details-etag-v1"')
+        await update_task("task-1", '"etag-v1"', checklistItems=checklist, references=refs, etagDetails='"details-etag-v1"')
 
     # Caller's original dicts must not have @odata.type injected into them.
     assert "@odata.type" not in checklist["guid-1"]
@@ -455,7 +467,7 @@ async def test_update_task_details_encodes_reference_keys(raw_key, expected_key,
     refs = {raw_key: {"alias": "Test"}}
 
     with graph_ctx(MODULE, graph_client):
-        await update_task("task-1", '"etag-v1"', references=refs, etag_details='"details-etag-v1"')
+        await update_task("task-1", '"etag-v1"', references=refs, etagDetails='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert expected_key in body.references.additional_data
@@ -471,7 +483,7 @@ async def test_update_task_details_sets_preview_type(preview_type, graph_ctx):
     graph_client = make_patching_graph_client(details_return_value=make_details())
 
     with graph_ctx(MODULE, graph_client):
-        await update_task("task-1", '"etag-v1"', preview_type=preview_type, etag_details='"details-etag-v1"')
+        await update_task("task-1", '"etag-v1"', previewType=preview_type, etagDetails='"details-etag-v1"')
 
     body = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.args[0]
     assert body.preview_type == PlannerPreviewType(preview_type)
@@ -483,7 +495,7 @@ async def test_update_task_details_invalid_preview_type_raises(graph_ctx):
 
     with graph_ctx(MODULE, graph_client):
         with pytest.raises(ValueError):
-            await update_task("task-1", '"etag-v1"', preview_type="invalid", etag_details='"details-etag-v1"')
+            await update_task("task-1", '"etag-v1"', previewType="invalid", etagDetails='"details-etag-v1"')
 
 
 @pytest.mark.parametrize("status,code", [
@@ -495,16 +507,16 @@ async def test_update_task_details_odata_error(status, code, graph_ctx, make_oda
 
     with graph_ctx(MODULE, graph_client):
         with pytest.raises(RuntimeError, match="Graph API error"):
-            await update_task("task-1", '"etag-v1"', description="x", etag_details='"details-etag-v1"')
+            await update_task("task-1", '"etag-v1"', description="x", etagDetails='"details-etag-v1"')
 
 
 # ---------------------------------------------------------------------------
-# update_task — etag_details auto-refresh
+# update_task — etagDetails auto-refresh
 # ---------------------------------------------------------------------------
 
 
 async def test_update_task_auto_refreshes_details_etag(graph_ctx):
-    """When etag_details is not provided, update_task auto-refreshes the ETag
+    """When etagDetails is not provided, update_task auto-refreshes the ETag
     from the details resource via GET before patching. Without this fallback,
     callers that only have the task-level ETag would need an extra round-trip.
     Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update"""
@@ -523,16 +535,16 @@ async def test_update_task_auto_refreshes_details_etag(graph_ctx):
 
 
 async def test_update_task_uses_explicit_details_etag(graph_ctx):
-    """When etag_details is provided, update_task uses it directly without
+    """When etagDetails is provided, update_task uses it directly without
     auto-refreshing. This avoids an extra GET round-trip when the caller
     already has the details ETag from a prior get_task_details call."""
     updated = make_details("explicit")
     graph_client = make_patching_graph_client(details_return_value=updated)
 
     with graph_ctx(MODULE, graph_client):
-        result = await update_task("task-1", '"etag-v1"', description="explicit", etag_details='"my-details-etag"')
+        result = await update_task("task-1", '"etag-v1"', description="explicit", etagDetails='"my-details-etag"')
 
-    # The details GET should NOT have been called since etag_details was provided.
+    # The details GET should NOT have been called since etagDetails was provided.
     graph_client.planner.tasks.by_planner_task_id.return_value.details.get.assert_not_awaited()
     # The details PATCH should use the explicitly provided ETag.
     config = graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.call_args.kwargs["request_configuration"]
@@ -560,7 +572,7 @@ async def test_update_task_combined_returns_both_results(graph_ctx):
             "task-1", '"etag-v1"',
             title="Updated",
             description="new desc",
-            etag_details='"details-etag-v1"',
+            etagDetails='"details-etag-v1"',
         )
 
     # Both PATCHes should have been called.
@@ -709,13 +721,13 @@ async def test_create_task_returns_created_task(graph_ctx):
     assert body.title == "My Task"
 
 
-@pytest.mark.parametrize("kwarg,dt_str,expected_utc", [
-    ("due_date_time",  "2026-05-31T00:00:00",       datetime(2026, 5, 31, 0,  0, 0, tzinfo=timezone.utc)),
-    ("due_date_time",  "2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
-    ("start_date_time", "2026-05-01T00:00:00",       datetime(2026, 5,  1, 0,  0, 0, tzinfo=timezone.utc)),
-    ("start_date_time", "2026-05-01T06:00:00+06:00", datetime(2026, 5,  1, 0,  0, 0, tzinfo=timezone.utc)),
+@pytest.mark.parametrize("kwarg,sdk_attr,dt_str,expected_utc", [
+    ("dueDateTime",   "due_date_time",   "2026-05-31T00:00:00",       datetime(2026, 5, 31, 0,  0, 0, tzinfo=timezone.utc)),
+    ("dueDateTime",   "due_date_time",   "2026-05-31T10:00:00+05:30", datetime(2026, 5, 31, 4, 30, 0, tzinfo=timezone.utc)),
+    ("startDateTime", "start_date_time", "2026-05-01T00:00:00",       datetime(2026, 5,  1, 0,  0, 0, tzinfo=timezone.utc)),
+    ("startDateTime", "start_date_time", "2026-05-01T06:00:00+06:00", datetime(2026, 5,  1, 0,  0, 0, tzinfo=timezone.utc)),
 ], ids=["due-naive", "due-offset", "start-naive", "start-offset"])
-async def test_create_task_converts_date_to_utc(kwarg, dt_str, expected_utc, graph_ctx):
+async def test_create_task_converts_date_to_utc(kwarg, sdk_attr, dt_str, expected_utc, graph_ctx):
     graph_client = MagicMock()
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
 
@@ -723,16 +735,18 @@ async def test_create_task_converts_date_to_utc(kwarg, dt_str, expected_utc, gra
         await create_task("plan-1", "bucket-1", "Task", **{kwarg: dt_str})
 
     body = graph_client.planner.tasks.post.call_args.args[0]
-    assert getattr(body, kwarg) == expected_utc
+    assert getattr(body, sdk_attr) == expected_utc
 
 
 async def test_create_task_raises_when_start_after_due(graph_ctx):
     with graph_ctx(MODULE, MagicMock()):
         with pytest.raises(ValueError, match="must not be after"):
             await create_task(
-                "plan-1", "bucket-1", "Task",
-                start_date_time="2026-06-01T00:00:00",
-                due_date_time="2026-05-01T00:00:00",
+                planId="plan-1",
+                bucketId="bucket-1",
+                title="Task",
+                startDateTime="2026-06-01T00:00:00",
+                dueDateTime="2026-05-01T00:00:00",
             )
 
 
@@ -741,7 +755,7 @@ async def test_create_task_assigns_users(graph_ctx):
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
 
     with graph_ctx(MODULE, graph_client):
-        await create_task("plan-1", "bucket-1", "Task", assign_user_ids=["user-a", "user-b"])
+        await create_task("plan-1", "bucket-1", "Task", assignUserIds=["user-a", "user-b"])
 
     body = graph_client.planner.tasks.post.call_args.args[0]
     assert body.assignments.additional_data["user-a"] == {
@@ -759,7 +773,7 @@ async def test_create_task_sets_optional_fields(graph_ctx):
     graph_client.planner.tasks.post = AsyncMock(return_value=make_task())
 
     with graph_ctx(MODULE, graph_client):
-        await create_task("plan-1", "bucket-1", "Task", percent_complete=50)
+        await create_task("plan-1", "bucket-1", "Task", percentComplete=50)
 
     body = graph_client.planner.tasks.post.call_args.args[0]
     assert body.percent_complete == 50

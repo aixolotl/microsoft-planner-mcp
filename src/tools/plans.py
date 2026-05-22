@@ -87,7 +87,7 @@ async def list_my_plans(
     annotations={"readOnlyHint": True},
 )
 async def list_group_plans(
-    group_id: Annotated[str, "The object ID of the group (from list_my_groups)."],
+    groupId: Annotated[str, "The object ID of the group (from list_my_groups)."],
     select: Annotated[str | None, "Comma-separated list of PlannerPlan fields to include. Pass '*all' for all fields."] = "id,title,owner,createdBy,createdDateTime",
 ) -> list[dict] | None:
     token = get_access_token()
@@ -97,7 +97,7 @@ async def list_group_plans(
     ctx = get_optional_context()
 
     if ctx is not None:
-        await ctx.info(f"Fetching Planner plans for group {group_id}")
+        await ctx.info(f"Fetching Planner plans for group {groupId}")
 
     # "*all" is a sentinel that bypasses $select entirely so Graph returns
     # every field. Passing select=None to the SDK achieves this — the SDK
@@ -118,7 +118,7 @@ async def list_group_plans(
         svc = PlannerService(graph_client)
         try:
             plans = await PlannerService.paginate(
-                graph_client.groups.by_group_id(group_id).planner.plans,
+                graph_client.groups.by_group_id(groupId).planner.plans,
                 RequestConfiguration(
                     query_parameters=PlansRequestBuilder.PlansRequestBuilderGetQueryParameters(
                         select=select_fields
@@ -136,10 +136,10 @@ async def list_group_plans(
                 raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
             code = exc.error.code if exc.error else None
             msg = exc.error.message if exc.error else exc.primary_message
-            raise ValueError(f"Access denied for group {group_id!r} ({code}): {msg}") from exc
+            raise ValueError(f"Access denied for group {groupId!r} ({code}): {msg}") from exc
 
     if ctx is not None:
-        await ctx.info(f"Found {len(plans)} plan(s) in group {group_id}")
+        await ctx.info(f"Found {len(plans)} plan(s) in group {groupId}")
 
     return svc.serialize_graph_list(plans) if plans else None
 
@@ -150,7 +150,7 @@ async def list_group_plans(
     tags={"plans", "write"},
 )
 async def create_plan(
-    group_id: Annotated[str, "The object ID of the M365 group that will own the plan (from list_my_groups)."],
+    groupId: Annotated[str, "The object ID of the M365 group that will own the plan (from list_my_groups)."],
     title: Annotated[str, "The display title for the new plan."],
 ) -> dict | None:
     token = get_access_token()
@@ -160,10 +160,10 @@ async def create_plan(
     ctx = get_optional_context()
 
     if ctx is not None:
-        await ctx.info(f"Creating plan '{title}' for group {group_id}")
+        await ctx.info(f"Creating plan '{title}' for group {groupId}")
 
     body = PlannerPlan()
-    body.owner = group_id
+    body.owner = groupId
     body.title = title
 
     async with graph_client_manager.for_user(token.token) as graph_client:
@@ -231,7 +231,7 @@ async def create_plan(
     annotations={"destructiveHint": True},
 )
 async def delete_plan(
-    plan_id: Annotated[str, "The ID of the plan to delete (from list_my_plans or list_group_plans)."],
+    planId: Annotated[str, "The ID of the plan to delete (from list_my_plans or list_group_plans)."],
     etag: Annotated[str, "The current @odata.etag of the plan. Retries once automatically if stale (412/409)."],
 ) -> str:
     token = get_access_token()
@@ -240,13 +240,13 @@ async def delete_plan(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        item = graph_client.planner.plans.by_planner_plan_id(plan_id)
+        item = graph_client.planner.plans.by_planner_plan_id(planId)
         await svc.with_retry(
             etag,
             lambda e: item.delete(request_configuration=svc.make_config(e)),
-            lambda: svc.refresh_etag(item.get, f"plan {plan_id!r}"),
+            lambda: svc.refresh_etag(item.get, f"plan {planId!r}"),
         )
-    return f"Deleted plan {plan_id!r}."
+    return f"Deleted plan {planId!r}."
 
 
 # readOnlyHint=True: this tool reads plan details without any side effects.
@@ -264,7 +264,7 @@ async def delete_plan(
     annotations={"readOnlyHint": True, "destructiveHint": False},
 )
 async def list_plan_categories(
-    plan_id: Annotated[str, "The ID of the plan (from list_my_plans or list_group_plans)."],
+    planId: Annotated[str, "The ID of the plan (from list_my_plans or list_group_plans)."],
 ) -> list[dict] | None:
     token = get_access_token()
     if token is None:
@@ -273,11 +273,11 @@ async def list_plan_categories(
     ctx = get_optional_context()
 
     if ctx is not None:
-        await ctx.debug(f"Fetching category descriptions for plan {plan_id}")
+        await ctx.debug(f"Fetching category descriptions for plan {planId}")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         try:
-            details = await graph_client.planner.plans.by_planner_plan_id(plan_id).details.get()
+            details = await graph_client.planner.plans.by_planner_plan_id(planId).details.get()
         except ODataError as exc:
             # 404 means the plan doesn't exist or the user cannot access it.
             # Return a clear message rather than a raw Graph error so the LLM
@@ -285,7 +285,7 @@ async def list_plan_categories(
             # Docs: https://learn.microsoft.com/en-us/graph/api/plannerplandetails-get
             if exc.response_status_code == 404:
                 raise ValueError(
-                    f"Plan {plan_id!r} not found. Use list_my_plans or list_group_plans to get a valid plan ID."
+                    f"Plan {planId!r} not found. Use list_my_plans or list_group_plans to get a valid plan ID."
                 ) from exc
             raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 

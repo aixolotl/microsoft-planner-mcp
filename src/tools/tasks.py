@@ -10,6 +10,7 @@ from fastmcp.exceptions import AuthorizationError
 from fastmcp.server.dependencies import get_access_token
 from kiota_abstractions.base_request_configuration import RequestConfiguration
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
+from msgraph.generated.models.planner_applied_categories import PlannerAppliedCategories
 from msgraph.generated.models.planner_assignments import PlannerAssignments
 from msgraph.generated.models.planner_checklist_items import PlannerChecklistItems
 from msgraph.generated.models.planner_external_references import PlannerExternalReferences
@@ -183,7 +184,7 @@ async def list_my_tasks(
     annotations={"readOnlyHint": True},
 )
 async def list_tasks(
-    plan_id: Annotated[str, "The ID of the plan to list tasks for (from list_my_plans or list_group_plans)."],
+    planId: Annotated[str, "The ID of the plan to list tasks for (from list_my_plans or list_group_plans)."],
     select: Annotated[str | None, "Comma-separated list of PlannerTask fields to include. Pass '*all' for all fields."] = "*all",
     filter: Annotated[
         str | None,
@@ -215,7 +216,7 @@ async def list_tasks(
     ctx = get_optional_context()
 
     if ctx is not None:
-        await ctx.info(f"Fetching tasks for plan {plan_id}")
+        await ctx.info(f"Fetching tasks for plan {planId}")
 
     if select == "*all":
         select = None
@@ -234,7 +235,7 @@ async def list_tasks(
             # forwarded because it controls which fields Graph returns.
             # Docs: https://github.com/aixolotl/microsoft-planner-mcp/issues/29
             tasks = await PlannerService.paginate(
-                graph_client.planner.plans.by_planner_plan_id(plan_id).tasks,
+                graph_client.planner.plans.by_planner_plan_id(planId).tasks,
                 RequestConfiguration(
                     query_parameters=PlanTasksRequestBuilder.TasksRequestBuilderGetQueryParameters(
                         select=select_fields,
@@ -253,7 +254,7 @@ async def list_tasks(
         )
 
     if ctx is not None:
-        await ctx.info(f"Found {len(tasks)} task(s) in plan {plan_id}")
+        await ctx.info(f"Found {len(tasks)} task(s) in plan {planId}")
 
     return svc.serialize_graph_list(tasks) if tasks else None
 
@@ -264,34 +265,34 @@ async def list_tasks(
     tags={"tasks", "write"},
 )
 async def create_task(
-    plan_id: Annotated[str, "The ID of the plan to create the task in."],
-    bucket_id: Annotated[str, "The ID of the bucket to place the task in (from list_buckets)."],
+    planId: Annotated[str, "The ID of the plan to create the task in."],
+    bucketId: Annotated[str, "The ID of the bucket to place the task in (from list_buckets)."],
     title: Annotated[str, "The title of the task."],
-    start_date_time: Annotated[str | None, "ISO 8601 start date (e.g. '2026-05-01T00:00:00'). Must not be after due_date_time."] = None,
-    due_date_time: Annotated[str | None, "ISO 8601 due date (e.g. '2026-05-31T00:00:00')."] = None,
-    percent_complete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
-    assign_user_ids: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
+    startDateTime: Annotated[str | None, "ISO 8601 start date (e.g. '2026-05-01T00:00:00'). Must not be after dueDateTime."] = None,
+    dueDateTime: Annotated[str | None, "ISO 8601 due date (e.g. '2026-05-31T00:00:00')."] = None,
+    percentComplete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
+    assignUserIds: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
 ) -> dict | None:
     token = get_access_token()
     if token is None:
         raise AuthorizationError("No access token available")
 
-    start_dt = PlannerService.to_utc(start_date_time) if start_date_time else None
-    due_dt = PlannerService.to_utc(due_date_time) if due_date_time else None
+    start_dt = PlannerService.to_utc(startDateTime) if startDateTime else None
+    due_dt = PlannerService.to_utc(dueDateTime) if dueDateTime else None
     if start_dt and due_dt and start_dt > due_dt:
-        raise ValueError(f"start_date_time ({start_date_time}) must not be after due_date_time ({due_date_time})")
+        raise ValueError(f"startDateTime ({startDateTime}) must not be after dueDateTime ({dueDateTime})")
 
     body = PlannerTask()
-    body.plan_id = plan_id
-    body.bucket_id = bucket_id
+    body.plan_id = planId
+    body.bucket_id = bucketId
     body.title = title
     if start_dt is not None:
         body.start_date_time = start_dt
     if due_dt is not None:
         body.due_date_time = due_dt
-    if percent_complete is not None:
-        body.percent_complete = percent_complete
-    if assign_user_ids:
+    if percentComplete is not None:
+        body.percent_complete = percentComplete
+    if assignUserIds:
         body.assignments = PlannerAssignments(
             additional_data={
                 user_id: {
@@ -303,7 +304,7 @@ async def create_task(
                     # Docs: https://learn.microsoft.com/en-us/graph/api/resources/planner-order-hint-format
                     "orderHint": " !",
                 }
-                for user_id in assign_user_ids
+                for user_id in assignUserIds
             }
         )
 
@@ -333,7 +334,7 @@ async def create_task(
     annotations={"readOnlyHint": True},
 )
 async def get_task_details(
-    task_id: Annotated[str, "The ID of the task to retrieve details for (from list_my_tasks or list_tasks)."],
+    taskId: Annotated[str, "The ID of the task to retrieve details for (from list_my_tasks or list_tasks)."],
 ) -> dict | None:
     token = get_access_token()
     if token is None:
@@ -342,12 +343,12 @@ async def get_task_details(
     ctx = get_optional_context()
 
     if ctx is not None:
-        await ctx.debug(f"Fetching details for task {task_id}")
+        await ctx.debug(f"Fetching details for task {taskId}")
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
         try:
-            result = await graph_client.planner.tasks.by_planner_task_id(task_id).details.get()
+            result = await graph_client.planner.tasks.by_planner_task_id(taskId).details.get()
         except ODataError as exc:
             raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
 
@@ -366,25 +367,27 @@ async def get_task_details(
     annotations={"idempotentHint": True},
 )
 async def update_task(
-    task_id: Annotated[str, "The ID of the task to update (from list_my_tasks or list_tasks)."],
+    taskId: Annotated[str, "The ID of the task to update (from list_my_tasks or list_tasks)."],
     etag: Annotated[str, "The current @odata.etag of the task resource. Retries once automatically if stale (412/409)."],
     title: Annotated[str | None, "New title for the task."] = None,
-    percent_complete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
-    due_date_time: Annotated[str | None, "ISO 8601 due date string (e.g. '2026-05-31T00:00:00')."] = None,
-    bucket_id: Annotated[str | None, "ID of the bucket to move the task to."] = None,
-    assignee_priority: Annotated[str | None, "Order hint string for sorting within the assignee's task list."] = None,
-    assign_user_ids: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
-    unassign_user_ids: Annotated[list[str] | None, "List of user object IDs to remove from the task."] = None,
+    percentComplete: Annotated[int, Field(description="Completion percentage (0–100).", ge=0, le=100)] | None = None,
+    dueDateTime: Annotated[str | None, "ISO 8601 due date string (e.g. '2026-05-31T00:00:00')."] = None,
+    bucketId: Annotated[str | None, "ID of the bucket to move the task to."] = None,
+    priority: Annotated[int, Field(description="Priority 0 (urgent)–10 (low). Planner maps: 1=urgent, 3=important, 5=medium, 9=low.", ge=0, le=10)] | None = None,
+    assigneePriority: Annotated[str | None, "Order hint string for sorting within the assignee's task list."] = None,
+    appliedCategories: Annotated[dict | None, "Categories applied to the task keyed by category slot (e.g. {\"category3\": true, \"category4\": false}). Use list_plan_categories for label names."] = None,
+    assignUserIds: Annotated[list[str] | None, "List of user object IDs to assign to the task."] = None,
+    unassignUserIds: Annotated[list[str] | None, "List of user object IDs to remove from the task."] = None,
     # --- Detail fields (updated via a separate PlannerTaskDetails PATCH) ---
     description: Annotated[str | None, "New plain-text description for the task (detail field)."] = None,
-    preview_type: Annotated[str | None, "Preview style shown in Planner UI. One of: automatic, noPreview, checklist, description, reference (detail field)."] = None,
-    checklist_items: Annotated[dict | None, "Dict keyed by checklist item GUID. Pass null for a key to delete that item (detail field)."] = None,
+    previewType: Annotated[str | None, "Preview style shown in Planner UI. One of: automatic, noPreview, checklist, description, reference (detail field)."] = None,
+    checklistItems: Annotated[dict | None, "Dict keyed by checklist item GUID. Pass null for a key to delete that item (detail field)."] = None,
     references: Annotated[dict | None, "Dict keyed by URL-encoded reference URL (periods to %2E, colons to %3A). Pass null for a key to delete that reference (detail field)."] = None,
-    etag_details: Annotated[
+    etagDetails: Annotated[
         str | None,
         "The current @odata.etag of the task *details* resource (from get_task_details). "
-        "Required only when updating detail fields (description, checklist_items, references, "
-        "preview_type). If omitted the ETag is auto-refreshed from Graph before patching.",
+        "Required only when updating detail fields (description, checklistItems, references, "
+        "previewType). If omitted the ETag is auto-refreshed from Graph before patching.",
     ] = None,
 ) -> dict | None:
     token = get_access_token()
@@ -395,11 +398,11 @@ async def update_task(
     # calls that are actually needed. Without this split, every update_task
     # call would issue two PATCH requests even when only standard fields change.
     has_standard = any(v is not None for v in [
-        title, percent_complete, due_date_time, bucket_id, assignee_priority,
-        assign_user_ids, unassign_user_ids,
+        title, percentComplete, dueDateTime, bucketId, priority,
+        assigneePriority, appliedCategories, assignUserIds, unassignUserIds,
     ])
     has_details = any(v is not None for v in [
-        description, preview_type, checklist_items, references,
+        description, previewType, checklistItems, references,
     ])
 
     async with graph_client_manager.for_user(token.token) as graph_client:
@@ -411,25 +414,30 @@ async def update_task(
             body = PlannerTask()
             for attr, value in [
                 ("title", title),
-                ("percent_complete", percent_complete),
-                ("bucket_id", bucket_id),
-                ("assignee_priority", assignee_priority),
-                ("due_date_time", PlannerService.to_utc(due_date_time) if due_date_time is not None else None),
+                ("percent_complete", percentComplete),
+                ("priority", priority),
+                ("bucket_id", bucketId),
+                ("assignee_priority", assigneePriority),
+                ("due_date_time", PlannerService.to_utc(dueDateTime) if dueDateTime is not None else None),
             ]:
                 if value is not None:
                     setattr(body, attr, value)
-            if assign_user_ids or unassign_user_ids:
+            if appliedCategories is not None:
+                body.applied_categories = PlannerAppliedCategories(
+                    additional_data=appliedCategories
+                )
+            if assignUserIds or unassignUserIds:
                 assignment_data: dict = {
                     user_id: {"@odata.type": "#microsoft.graph.plannerAssignment", "orderHint": " !"}
-                    for user_id in (assign_user_ids or [])
-                } | {user_id: None for user_id in (unassign_user_ids or [])}
+                    for user_id in (assignUserIds or [])
+                } | {user_id: None for user_id in (unassignUserIds or [])}
                 body.assignments = PlannerAssignments(additional_data=assignment_data)
 
-            item = graph_client.planner.tasks.by_planner_task_id(task_id)
+            item = graph_client.planner.tasks.by_planner_task_id(taskId)
             task_result = await svc.with_retry(
                 etag,
                 lambda e: item.patch(body, request_configuration=svc.make_config(e, prefer_representation=True)),
-                lambda: svc.refresh_etag(item.get, f"task {task_id!r}"),
+                lambda: svc.refresh_etag(item.get, f"task {taskId!r}"),
             )
 
         # --- Detail fields (description, checklist, references, previewType) ---
@@ -438,24 +446,24 @@ async def update_task(
             details_body = PlannerTaskDetails()
             if description is not None:
                 details_body.description = description
-            if preview_type is not None:
+            if previewType is not None:
                 # PlannerPreviewType is a str enum — look up by value (case-sensitive).
                 # Without this, callers would need to know the Python enum member name.
                 # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
-                details_body.preview_type = PlannerPreviewType(preview_type)
-            if checklist_items is not None:
+                details_body.preview_type = PlannerPreviewType(previewType)
+            if checklistItems is not None:
                 # Copy to avoid mutating the caller's dict when injecting @odata.type.
                 # Without the copy, callers that reuse the dict would see unexpected
                 # side effects (extra keys added silently).
-                checklist_items = {k: ({**v} if isinstance(v, dict) else v) for k, v in checklist_items.items()}
+                checklistItems = {k: ({**v} if isinstance(v, dict) else v) for k, v in checklistItems.items()}
                 # The Graph Planner API requires @odata.type on every checklist item
                 # in the PATCH body. Without it, Graph returns 400: "The given untyped
                 # value … is invalid. Consider using a OData type annotation explicitly."
                 # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
-                for value in checklist_items.values():
+                for value in checklistItems.values():
                     if isinstance(value, dict) and "@odata.type" not in value:
                         value["@odata.type"] = "microsoft.graph.plannerChecklistItem"
-                details_body.checklist = PlannerChecklistItems(additional_data=checklist_items)
+                details_body.checklist = PlannerChecklistItems(additional_data=checklistItems)
             if references is not None:
                 # Graph Planner requires reference keys to encode only ":" → %3A and
                 # "." → %2E. Slashes and other URL characters stay literal — the docs
@@ -478,19 +486,19 @@ async def update_task(
                         value["@odata.type"] = "microsoft.graph.plannerExternalReference"
                 details_body.references = PlannerExternalReferences(additional_data=references)
 
-            details_item = graph_client.planner.tasks.by_planner_task_id(task_id).details
-            # When etag_details is not provided, auto-refresh from Graph so the
+            details_item = graph_client.planner.tasks.by_planner_task_id(taskId).details
+            # When etagDetails is not provided, auto-refresh from Graph so the
             # update works even without a prior get_task_details call. Without
             # this fallback, callers that only have the task-level ETag would
             # need an extra round-trip to fetch the details ETag manually.
             # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
-            resolved_etag = etag_details or await svc.refresh_etag(
-                details_item.get, f"task details {task_id!r}"
+            resolved_etag = etagDetails or await svc.refresh_etag(
+                details_item.get, f"task details {taskId!r}"
             )
             details_result = await svc.with_retry(
                 resolved_etag,
                 lambda e: details_item.patch(details_body, request_configuration=svc.make_config(e, prefer_representation=True)),
-                lambda: svc.refresh_etag(details_item.get, f"task details {task_id!r}"),
+                lambda: svc.refresh_etag(details_item.get, f"task details {taskId!r}"),
             )
 
         # Return both results when both resources were updated so the caller
@@ -507,11 +515,11 @@ async def update_task(
         if not has_standard:
             # No fields provided at all — send an empty PATCH like before.
             body = PlannerTask()
-            item = graph_client.planner.tasks.by_planner_task_id(task_id)
+            item = graph_client.planner.tasks.by_planner_task_id(taskId)
             task_result = await svc.with_retry(
                 etag,
                 lambda e: item.patch(body, request_configuration=svc.make_config(e, prefer_representation=True)),
-                lambda: svc.refresh_etag(item.get, f"task {task_id!r}"),
+                lambda: svc.refresh_etag(item.get, f"task {taskId!r}"),
             )
         return svc.serialize_graph_object(task_result) if task_result else None
 
@@ -572,7 +580,7 @@ async def list_task_fields() -> list[dict]:
     annotations={"destructiveHint": True},
 )
 async def delete_task(
-    task_id: Annotated[str, "The ID of the task to delete."],
+    taskId: Annotated[str, "The ID of the task to delete."],
     etag: Annotated[str, "The current @odata.etag of the task. Retries once automatically if stale (412/409)."],
 ) -> str:
     token = get_access_token()
@@ -581,10 +589,10 @@ async def delete_task(
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
-        item = graph_client.planner.tasks.by_planner_task_id(task_id)
+        item = graph_client.planner.tasks.by_planner_task_id(taskId)
         await svc.with_retry(
             etag,
             lambda e: item.delete(request_configuration=svc.make_config(e)),
-            lambda: svc.refresh_etag(item.get, f"task {task_id!r}"),
+            lambda: svc.refresh_etag(item.get, f"task {taskId!r}"),
         )
-    return f"Deleted task {task_id!r}."
+    return f"Deleted task {taskId!r}."
