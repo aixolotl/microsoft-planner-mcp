@@ -44,7 +44,7 @@ mcp = FastMCP(
         "Authenticate with your Microsoft account to read and manage Planner tasks."
     ),
     mask_error_details=True,
-    version="0.3.0",
+    version="0.3.1",
     # Forward ctx.info() / ctx.debug() log messages to MCP clients at INFO
     # level and above. Without this, tool-level ctx.info() calls are silently
     # suppressed even though the tools emit them. Clients (Claude, MCP
@@ -106,7 +106,7 @@ mcp.mount(users_router)
 
 @mcp.custom_route("/health", methods=["GET"])
 async def health_check(request: Request) -> JSONResponse:
-    return JSONResponse({"status": "healthy", "service": "planner-mcp"})
+    return JSONResponse({"status": "healthy", "service": mcp.name, "version": mcp.version})
 
 
 @mcp.custom_route("/.well-known/oauth-protected-resource", methods=["GET"])
