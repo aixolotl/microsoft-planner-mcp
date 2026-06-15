@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     # https://gofastmcp.com/servers/auth/oauth-proxy#param-require-authorization-consent
     REQUIRE_AUTHORIZATION_CONSENT: bool = True
 
+    # Sliding-window rate limit applied per client. LLM agents can fan out tool
+    # calls rapidly; these caps prevent exhausting the Microsoft Graph throttling
+    # quota (10,000 req/10min per tenant). Without configurable limits, operators
+    # cannot tune the ceiling to match their tenant's usage patterns.
+    # Docs: https://gofastmcp.com/servers/middleware#rate-limiting
+    RATE_LIMIT_MAX_REQUESTS: int = 120
+    RATE_LIMIT_WINDOW_MINUTES: int = 1
+
 
 # pydantic-settings reads CLIENT_ID, CLIENT_SECRET, and TENANT_ID from the
 # environment / .env at runtime, so there are no missing arguments even though
