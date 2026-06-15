@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pydantic import PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,8 +44,8 @@ class Settings(BaseSettings):
     # quota (10,000 req/10min per tenant). Without configurable limits, operators
     # cannot tune the ceiling to match their tenant's usage patterns.
     # Docs: https://gofastmcp.com/servers/middleware#rate-limiting
-    RATE_LIMIT_MAX_REQUESTS: int = 120
-    RATE_LIMIT_WINDOW_MINUTES: int = 1
+    RATE_LIMIT_MAX_REQUESTS: PositiveInt = 120
+    RATE_LIMIT_WINDOW_MINUTES: PositiveInt = 1
 
 
 # pydantic-settings reads CLIENT_ID, CLIENT_SECRET, and TENANT_ID from the

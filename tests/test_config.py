@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from src import config as config_module
 
@@ -58,3 +59,32 @@ def test_rate_limit_reads_env(monkeypatch, env_var, env_value, field, expected):
     settings = config_module.Settings(_env_file=None)
 
     assert getattr(settings, field) == expected
+
+
+# ---------------------------------------------------------------------------
+# Tests: rate limiting rejects non-positive values
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "env_var,env_value",
+    [
+        ("RATE_LIMIT_MAX_REQUESTS", "0"),
+        ("RATE_LIMIT_MAX_REQUESTS", "-1"),
+        ("RATE_LIMIT_WINDOW_MINUTES", "0"),
+        ("RATE_LIMIT_WINDOW_MINUTES", "-5"),
+    ],
+    ids=[
+        "max-requests-zero",
+        "max-requests-negative",
+        "window-minutes-zero",
+        "window-minutes-negative",
+    ],
+)
+def test_rate_limit_rejects_non_positive(monkeypatch, env_var, env_value):
+    monkeypatch.delenv(env_var, raising=False)
+    monkeypatch.delenv(env_var.lower(), raising=False)
+    monkeypatch.setenv(env_var, env_value)
+
+    with pytest.raises(ValidationError):
+        config_module.Settings(_env_file=None)
