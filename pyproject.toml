@@ -1,6 +1,6 @@
 [project]
 name = "microsoft-planner-mcp"
-version = "0.3.1"
+version = "0.3.2"
 description = "MCP server for Microsoft Planner via Microsoft Graph"
 readme = "README.md"
 license = "MIT"
