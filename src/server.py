@@ -66,12 +66,15 @@ mcp = FastMCP(
 # Docs: https://gofastmcp.com/servers/middleware#error-handling
 mcp.add_middleware(ErrorHandlingMiddleware(include_traceback=True))
 
-# Enforces a 60 req/min ceiling per client using a sliding window. LLM agents
-# can fan out tool calls rapidly (e.g. fetching details for every task in a
-# plan). Without this, an unconstrained agent could exhaust the Microsoft Graph
+# Enforces a configurable sliding-window rate limit per client. LLM agents can
+# fan out tool calls rapidly (e.g. fetching details for every task in a plan).
+# Without this, an unconstrained agent could exhaust the Microsoft Graph
 # throttling quota (10,000 req/10min per tenant), causing 429s for all users.
 # Docs: https://gofastmcp.com/servers/middleware#rate-limiting
-mcp.add_middleware(SlidingWindowRateLimitingMiddleware(max_requests=60, window_minutes=1))
+mcp.add_middleware(SlidingWindowRateLimitingMiddleware(
+    max_requests=settings.RATE_LIMIT_MAX_REQUESTS,
+    window_minutes=settings.RATE_LIMIT_WINDOW_MINUTES,
+))
 
 # Records wall-clock duration for every MCP operation and emits it to the log.
 # Useful for spotting which Graph API calls are slow (e.g. list_tasks

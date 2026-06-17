@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pydantic import PositiveInt
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +38,14 @@ class Settings(BaseSettings):
     # clients but removes that extra approval step. Docs:
     # https://gofastmcp.com/servers/auth/oauth-proxy#param-require-authorization-consent
     REQUIRE_AUTHORIZATION_CONSENT: bool = True
+
+    # Sliding-window rate limit applied per client. LLM agents can fan out tool
+    # calls rapidly; these caps prevent exhausting the Microsoft Graph throttling
+    # quota (10,000 req/10min per tenant). Without configurable limits, operators
+    # cannot tune the ceiling to match their tenant's usage patterns.
+    # Docs: https://gofastmcp.com/servers/middleware#rate-limiting
+    RATE_LIMIT_MAX_REQUESTS: PositiveInt = 120
+    RATE_LIMIT_WINDOW_MINUTES: PositiveInt = 1
 
 
 # pydantic-settings reads CLIENT_ID, CLIENT_SECRET, and TENANT_ID from the
