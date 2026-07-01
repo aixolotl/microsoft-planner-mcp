@@ -275,7 +275,7 @@ List all Planner plans belonging to a Microsoft 365 group.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `group_id` | string | Yes | The object ID of the group (from `list_my_groups`) |
+| `groupId` | string | Yes | The object ID of the group (from `list_my_groups`) |
 | `select` | string | No | Comma-separated fields to include (default: `id,title,owner,createdBy,createdDateTime`). Pass `*all` for all fields. |
 
 - **Returns:** List of plan objects or `null`
@@ -286,7 +286,7 @@ Create a new Planner plan for a Microsoft 365 group.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `group_id` | string | Yes | The object ID of the M365 group that will own the plan |
+| `groupId` | string | Yes | The object ID of the M365 group that will own the plan |
 | `title` | string | Yes | Display title for the new plan |
 
 - **Returns:** The created plan object or `null`
@@ -297,7 +297,7 @@ Delete a Planner plan.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plan_id` | string | Yes | The ID of the plan to delete |
+| `planId` | string | Yes | The ID of the plan to delete |
 | `etag` | string | Yes | The current `@odata.etag` of the plan (retries once if stale) |
 
 - **Returns:** Confirmation message
@@ -308,7 +308,7 @@ Get category label definitions for a Planner plan. Returns all 25 category slots
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plan_id` | string | Yes | The ID of the plan |
+| `planId` | string | Yes | The ID of the plan |
 
 - **Returns:** List of category objects (`key`, `display_name`) or `null`
 
@@ -320,7 +320,7 @@ List all buckets in a Planner plan.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plan_id` | string | Yes | The ID of the plan |
+| `planId` | string | Yes | The ID of the plan |
 
 - **Returns:** List of bucket objects or `null`
 
@@ -330,7 +330,7 @@ Create a new bucket in a Planner plan.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plan_id` | string | Yes | The ID of the plan to create the bucket in |
+| `planId` | string | Yes | The ID of the plan to create the bucket in |
 | `name` | string | Yes | Display name for the new bucket |
 
 - **Returns:** The created bucket object or `null`
@@ -341,7 +341,7 @@ Delete a Planner bucket.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `bucket_id` | string | Yes | The ID of the bucket to delete |
+| `bucketId` | string | Yes | The ID of the bucket to delete |
 | `etag` | string | Yes | The current `@odata.etag` of the bucket (retries once if stale) |
 
 - **Returns:** Confirmation message
@@ -366,7 +366,7 @@ List all tasks in a Planner plan.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plan_id` | string | Yes | The ID of the plan |
+| `planId` | string | Yes | The ID of the plan |
 | `select` | string | No | Comma-separated fields to include (default: `*all`). Pass `*all` for all fields. |
 | `filter` | string | No | OData filter expression, e.g. `percentComplete eq 0` |
 | `search` | string | No | Free-text search matched against the task title |
@@ -379,7 +379,7 @@ Get the full details for a task: description, checklist items, and external refe
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `task_id` | string | Yes | The ID of the task |
+| `taskId` | string | Yes | The ID of the task |
 
 - **Returns:** Task details object (description, checklist, references) or `null`
 
@@ -389,13 +389,13 @@ Create a new task in a Planner plan.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `plan_id` | string | Yes | The ID of the plan |
-| `bucket_id` | string | Yes | The ID of the bucket to place the task in |
+| `planId` | string | Yes | The ID of the plan |
+| `bucketId` | string | Yes | The ID of the bucket to place the task in |
 | `title` | string | Yes | Title of the task |
-| `start_date_time` | string | No | ISO 8601 start date (e.g. `2026-05-01T00:00:00`) |
-| `due_date_time` | string | No | ISO 8601 due date (e.g. `2026-05-31T00:00:00`) |
-| `percent_complete` | integer | No | Completion percentage, 0–100 |
-| `assign_user_ids` | list[string] | No | User object IDs to assign to the task |
+| `startDateTime` | string | No | ISO 8601 start date (e.g. `2026-05-01T00:00:00`) |
+| `dueDateTime` | string | No | ISO 8601 due date (e.g. `2026-05-31T00:00:00`) |
+| `percentComplete` | integer | No | Completion percentage, 0–100 |
+| `assignUserIds` | list[string] | No | User object IDs to assign to the task |
 
 - **Returns:** The created task object or `null`
 
@@ -405,24 +405,26 @@ Update a task's standard fields and/or detail fields (description, checklist, re
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `task_id` | string | Yes | The ID of the task |
+| `taskId` | string | Yes | The ID of the task |
 | `etag` | string | Yes | The current `@odata.etag` of the task (retries once if stale) |
 | `title` | string | No | New title |
-| `percent_complete` | integer | No | Completion percentage, 0–100 |
-| `due_date_time` | string | No | ISO 8601 due date |
-| `bucket_id` | string | No | ID of the bucket to move the task to |
-| `assignee_priority` | string | No | Order hint for sorting within the assignee's task list |
-| `assign_user_ids` | list[string] | No | User IDs to assign |
-| `unassign_user_ids` | list[string] | No | User IDs to remove |
+| `percentComplete` | integer | No | Completion percentage, 0–100 |
+| `dueDateTime` | string | No | ISO 8601 due date |
+| `bucketId` | string | No | ID of the bucket to move the task to |
+| `priority` | integer | No | Priority 0 (urgent)–10 (low). Planner maps: 1=urgent, 3=important, 5=medium, 9=low |
+| `assigneePriority` | string | No | Order hint for sorting within the assignee's task list |
+| `appliedCategories` | object | No | Categories keyed by category slot (e.g. `{"category3": true}`). Use `list_plan_categories` for label names |
+| `assignUserIds` | list[string] | No | User IDs to assign |
+| `unassignUserIds` | list[string] | No | User IDs to remove |
 | `description` | string | No | Plain-text description (up to 2000 characters) — detail field |
-| `preview_type` | string | No | Preview style: `automatic`, `noPreview`, `checklist`, `description`, or `reference` — detail field |
-| `checklist_items` | object | No | Dict keyed by checklist item GUID. Pass `null` for a key to delete that item — detail field |
+| `previewType` | string | No | Preview style: `automatic`, `noPreview`, `checklist`, `description`, or `reference` — detail field |
+| `checklistItems` | object | No | Dict keyed by checklist item GUID. Pass `null` for a key to delete that item — detail field |
 | `references` | object | No | Dict keyed by URL-encoded reference URL. Pass `null` for a key to delete that reference — detail field |
-| `etag_details` | string | No | The `@odata.etag` of the task details resource. Required only when updating detail fields; auto-refreshed from Graph if omitted. |
+| `etagDetails` | string | No | The `@odata.etag` of the task details resource. Required only when updating detail fields; auto-refreshed from Graph if omitted. |
 
 - **Returns:** The updated task object, the updated task details object, or both (`{ "task": ..., "details": ... }`) depending on which fields were provided. Returns `null` if the result is empty.
 
-> **Note:** The `update_task_details` tool has been removed. Use `update_task` with detail field parameters (`description`, `checklist_items`, `references`, `preview_type`) instead. The task and details resources have separate ETags — provide `etag_details` when available to avoid an extra round-trip, or omit it to let the tool auto-refresh.
+> **Note:** The `update_task_details` tool has been removed. Use `update_task` with detail field parameters (`description`, `checklistItems`, `references`, `previewType`) instead. The task and details resources have separate ETags — provide `etagDetails` when available to avoid an extra round-trip, or omit it to let the tool auto-refresh.
 
 #### `list_task_fields`
 
@@ -439,7 +441,7 @@ Delete a Planner task.
 
 | Parameter | Type | Required | Description |
 |---|---|---|---|
-| `task_id` | string | Yes | The ID of the task |
+| `taskId` | string | Yes | The ID of the task |
 | `etag` | string | Yes | The current `@odata.etag` of the task (retries once if stale) |
 
 - **Returns:** Confirmation message
