@@ -142,11 +142,11 @@ BASE_URL=http://localhost:8000
 # Include http://localhost:6274 if using MCP Inspector for testing
 ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274"]
 
-# Require FastMCP's extra client consent prompt per MCP client. Prevents
-# confused-deputy attacks by requiring users to explicitly approve each new
+# Require FastMCP's extra client consent prompt per MCP client. (default: true)
+# Prevents confused-deputy attacks by requiring users to explicitly approve each new
 # client. Keep true in production; set false only for local dev with throwaway
 # clients.
-REQUIRE_AUTHORIZATION_CONSENT=true
+# REQUIRE_AUTHORIZATION_CONSENT=true
 
 # Optional rate-limit overrides (per client sliding window)
 # Defaults are 120 requests per 1 minute
@@ -154,7 +154,7 @@ REQUIRE_AUTHORIZATION_CONSENT=true
 # RATE_LIMIT_WINDOW_MINUTES=1
 ```
 
-`REQUIRE_AUTHORIZATION_CONSENT` controls whether FastMCP prompts users to explicitly approve each new MCP client. Keep this `true` in production to prevent confused-deputy attacks; set it to `false` only during local development with throwaway clients.
+`REQUIRE_AUTHORIZATION_CONSENT` controls whether FastMCP prompts users to explicitly approve each new MCP client. Keep this `true` (default) in production to prevent confused-deputy attacks; set it to `false` only during local development with throwaway clients.
 
 `RATE_LIMIT_MAX_REQUESTS` and `RATE_LIMIT_WINDOW_MINUTES` are optional and should stay commented out unless you need to override the defaults for your environment.
 
