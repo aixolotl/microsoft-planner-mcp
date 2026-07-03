@@ -144,7 +144,14 @@ ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274"]
 
 # Require FastMCP's extra client consent prompt (set false only for local dev)
 REQUIRE_AUTHORIZATION_CONSENT=true
+
+# Optional rate-limit overrides (per client sliding window)
+# Defaults are 120 requests per 1 minute
+# RATE_LIMIT_MAX_REQUESTS=120
+# RATE_LIMIT_WINDOW_MINUTES=1
 ```
+
+`RATE_LIMIT_MAX_REQUESTS` and `RATE_LIMIT_WINDOW_MINUTES` are optional and should stay commented out unless you need to override the defaults for your environment.
 
 ## Running the Server
 
@@ -174,6 +181,7 @@ docker run --rm -i \
 ```
 
 This starts the MCP server on port 8000.
+To override rate limits, also pass `-e RATE_LIMIT_MAX_REQUESTS=<value>` and `-e RATE_LIMIT_WINDOW_MINUTES=<minutes>` (defaults: `120` and `1`).
 
 ### Running with Docker compose
 
