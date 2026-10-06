@@ -152,11 +152,32 @@ ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274"]
 # Defaults are 120 requests per 1 minute
 # RATE_LIMIT_MAX_REQUESTS=120
 # RATE_LIMIT_WINDOW_MINUTES=1
+
+# Optional: keep sign-ins in Redis so they survive restarts (see below)
+# REDIS_URL=rediss://:<access-key>@<name>.redis.cache.windows.net:6380/0
+# JWT_SIGNING_KEY=<long random string>
+# STORAGE_ENCRYPTION_KEY=<Fernet key>
 ```
 
 `REQUIRE_AUTHORIZATION_CONSENT` controls whether FastMCP prompts users to explicitly approve each new MCP client. Keep this `true` (default) in production to prevent confused-deputy attacks; set it to `false` only during local development with throwaway clients.
 
 `RATE_LIMIT_MAX_REQUESTS` and `RATE_LIMIT_WINDOW_MINUTES` are optional and should stay commented out unless you need to override the defaults for your environment.
+
+### Keeping sign-ins across restarts (Redis)
+
+By default the server keeps OAuth state — client registrations and users' Entra tokens — in an encrypted file store inside the container. That state is lost when the container is recreated or an Azure Container App scales to zero, and each replica has its own copy. Clients then fail to refresh with `401 invalid_client` and users must reconnect.
+
+Set `REDIS_URL` when you run more than one replica, scale to zero, or recreate containers:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `REDIS_URL` | unset (file store) | `redis://` or `rediss://` (TLS — required by Azure Redis). The path selects the DB index, so the store can share a Redis with other services (e.g. `/1`). **Contains a credential: keep it in a secret.** |
+| `JWT_SIGNING_KEY` | derived from `CLIENT_SECRET` | Fixed secret for signing the server's tokens. Set it so rotating the Entra client secret no longer signs every user out. Use the same value on every replica. |
+| `STORAGE_ENCRYPTION_KEY` | derived like FastMCP's default | Fernet key encrypting the Redis store (generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`). Requires `REDIS_URL` — the server refuses to start without it. |
+
+Everything written to Redis is Fernet-encrypted; entries expire with FastMCP's lifetimes (refresh tokens 30 days, sign-in transactions minutes). An invalid `REDIS_URL` or `STORAGE_ENCRYPTION_KEY` fails at startup.
+
+> **Enabling these settings signs everyone out once.** Turning on `REDIS_URL`, setting `JWT_SIGNING_KEY`, or changing either key later invalidates existing sign-ins: connected clients get a `401` on their next call or refresh and must reconnect once. Existing file-store state is not migrated. Plan the switch.
 
 ## Running the Server
 
@@ -187,6 +208,7 @@ docker run --rm -i \
 
 This starts the MCP server on port 8000.
 To override rate limits, also pass `-e RATE_LIMIT_MAX_REQUESTS=<value>` and `-e RATE_LIMIT_WINDOW_MINUTES=<minutes>` (defaults: `120` and `1`).
+To keep sign-ins across container recreation, also pass `-e REDIS_URL=...` (see [Keeping sign-ins across restarts](#keeping-sign-ins-across-restarts-redis)).
 
 ### Running with Docker compose
 
