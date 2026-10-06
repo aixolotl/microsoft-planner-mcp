@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from pydantic import PositiveInt
+from cryptography.fernet import Fernet
+from pydantic import (
+    Field,
+    PositiveInt,
+    RedisDsn,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,7 +17,20 @@ class Settings(BaseSettings):
     # environment variables. Without env_file every required value must be
     # exported in the shell, which is impractical for local development.
     # Docs: https://docs.pydantic.dev/latest/concepts/pydantic_settings/#dotenv-env-support
-    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
+    # hide_input_in_errors: REDIS_URL carries the Redis password, and pydantic
+    # echoes the raw input in validation errors by default — a malformed URL
+    # would print the credential to the startup log.
+    # Docs: https://docs.pydantic.dev/latest/api/config/#pydantic.config.ConfigDict.hide_input_in_errors
+    # env_ignore_empty: `JWT_SIGNING_KEY=` (an uncommented .env.example line or
+    # an unset compose ${VAR}) must mean "unset", not SecretStr('') — an empty
+    # signing key would derive a publicly computable Redis encryption key.
+    # Docs: https://docs.pydantic.dev/latest/concepts/pydantic_settings/#parsing-environment-variable-values
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        hide_input_in_errors=True,
+        env_ignore_empty=True,
+    )
 
     # Azure Entra ID app registration credentials. Used by AzureProvider
     # (auth_provider.py) to drive the OAuth authorization code flow and by
@@ -46,6 +67,62 @@ class Settings(BaseSettings):
     # Docs: https://gofastmcp.com/servers/middleware#rate-limiting
     RATE_LIMIT_MAX_REQUESTS: PositiveInt = 120
     RATE_LIMIT_WINDOW_MINUTES: PositiveInt = 1
+
+    # Where the OAuth proxy keeps client registrations and user tokens. Unset,
+    # FastMCP uses an encrypted file store inside the container, which is lost
+    # on container recreation / scale-to-zero and not shared between replicas
+    # — every client then fails token refresh with 401 invalid_client.
+    # redis:// or rediss:// (TLS, required by Azure Redis); the path selects
+    # the DB index so the store can share a Redis with other services.
+    # Docs: https://gofastmcp.com/servers/auth/oauth-proxy
+    # repr=False: the URL carries the Redis password; keep it out of reprs/logs.
+    REDIS_URL: RedisDsn | None = Field(default=None, repr=False)
+
+    # Fixed secret for signing FastMCP's tokens. Unset, it is derived from
+    # CLIENT_SECRET, so rotating the Entra secret logs every user out. Also the
+    # root of the derived Redis encryption key, so a short one is refused.
+    JWT_SIGNING_KEY: SecretStr | None = Field(default=None, min_length=32)
+
+    # Fernet key encrypting the Redis store. Unset, it is derived the way
+    # FastMCP derives its default store key. Only meaningful with REDIS_URL.
+    # Docs: https://cryptography.io/en/latest/fernet/
+    STORAGE_ENCRYPTION_KEY: SecretStr | None = None
+
+    @field_validator("REDIS_URL")
+    @classmethod
+    def _numeric_db_path(cls, value: RedisDsn | None) -> RedisDsn | None:
+        # redis-py ignores a non-numeric path and silently uses DB 0.
+        if value is not None and value.path not in (None, "", "/"):
+            if not value.path.lstrip("/").isdigit():
+                raise ValueError("REDIS_URL path must be a DB index, e.g. /1")
+        return value
+
+    @field_validator("JWT_SIGNING_KEY")
+    @classmethod
+    def _non_blank_signing_key(cls, value: SecretStr | None) -> SecretStr | None:
+        # Whitespace passes min_length but is as predictable as an empty key.
+        if value is not None and not value.get_secret_value().strip():
+            raise ValueError("JWT_SIGNING_KEY must not be blank")
+        return value
+
+    @field_validator("STORAGE_ENCRYPTION_KEY")
+    @classmethod
+    def _valid_fernet_key(cls, value: SecretStr | None) -> SecretStr | None:
+        if value is not None:
+            try:
+                Fernet(value.get_secret_value())
+            except ValueError as exc:
+                raise ValueError(
+                    "STORAGE_ENCRYPTION_KEY must be a Fernet key "
+                    "(Fernet.generate_key(): 32 url-safe base64-encoded bytes)"
+                ) from exc
+        return value
+
+    @model_validator(mode="after")
+    def _encryption_key_needs_redis(self) -> Settings:
+        if self.STORAGE_ENCRYPTION_KEY is not None and self.REDIS_URL is None:
+            raise ValueError("STORAGE_ENCRYPTION_KEY requires REDIS_URL")
+        return self
 
 
 # pydantic-settings reads CLIENT_ID, CLIENT_SECRET, and TENANT_ID from the

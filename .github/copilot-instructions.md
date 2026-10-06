@@ -18,7 +18,7 @@ MCP server for Microsoft Planner built with FastMCP and Microsoft Graph SDK. Aut
 - `src/` — application package
   - `src/server.py` — FastMCP app, middleware, route mounting
   - `src/config.py` — `Settings` via `pydantic_settings.BaseSettings`
-  - `src/auth_provider.py` — Azure OAuth provider
+  - `src/auth_provider.py` — Azure OAuth provider; optional encrypted Redis store for OAuth state (`REDIS_URL`)
   - `src/deps.py` — shared dependency helpers (e.g. `get_optional_context()`)
   - `src/graph_client_manager.py` — singleton `GraphClientManager` with per-user OBO clients
   - `src/types.py` — shared structural types (e.g. `CollectionRequestBuilder` Protocol)

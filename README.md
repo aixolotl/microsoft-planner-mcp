@@ -152,11 +152,32 @@ ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274"]
 # Defaults are 120 requests per 1 minute
 # RATE_LIMIT_MAX_REQUESTS=120
 # RATE_LIMIT_WINDOW_MINUTES=1
+
+# Optional: keep sign-ins in Redis so they survive restarts (see below)
+# REDIS_URL=rediss://:<access-key>@<name>.redis.cache.windows.net:6380/0
+# JWT_SIGNING_KEY=<long random string>
+# STORAGE_ENCRYPTION_KEY=<Fernet key>
 ```
 
 `REQUIRE_AUTHORIZATION_CONSENT` controls whether FastMCP prompts users to explicitly approve each new MCP client. Keep this `true` (default) in production to prevent confused-deputy attacks; set it to `false` only during local development with throwaway clients.
 
 `RATE_LIMIT_MAX_REQUESTS` and `RATE_LIMIT_WINDOW_MINUTES` are optional and should stay commented out unless you need to override the defaults for your environment.
+
+### Keeping sign-ins across restarts (Redis)
+
+By default the server keeps OAuth state — client registrations and users' Entra tokens — in an encrypted file store inside the container. That state is lost when the container is recreated or an Azure Container App scales to zero, and each replica has its own copy. Clients then fail to refresh with `401 invalid_client` and users must reconnect.
+
+Set `REDIS_URL` when you run more than one replica, scale to zero, or recreate containers:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `REDIS_URL` | unset (file store) | `redis://` or `rediss://` (TLS — required by Azure Redis). The path is the DB index (e.g. `/1`). Percent-encode the password if it contains `/` (Azure access keys can): `python -c "import urllib.parse; print(urllib.parse.quote('<key>', safe=''))"`. A non-clustered Redis is required (Redis Cluster supports only DB 0 and is not supported). **Contains a credential: keep it in a secret.** |
+| `JWT_SIGNING_KEY` | derived from `CLIENT_SECRET` | Fixed secret (at least 32 characters) for signing the server's tokens. Set it so rotating the Entra client secret no longer signs every user out. Use the same value on every replica. |
+| `STORAGE_ENCRYPTION_KEY` | derived like FastMCP's default | Fernet key encrypting the Redis store (generate: `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`). Requires `REDIS_URL` — the server refuses to start without it. **Set it explicitly in production**: the derived default follows FastMCP's internal key scheme, so it is only as stable as that scheme. |
+
+Everything written to Redis is Fernet-encrypted. Tokens and sign-in transactions expire with FastMCP's lifetimes (refresh tokens 30 days, transactions minutes), but **client registrations never expire** — one is added per MCP client registration, and entries written under an old key stay behind as unreadable garbage. Give the store its own DB index (or its own Redis) rather than sharing a DB with a cache, and use an eviction policy that does not drop it silently (`noeviction`, or `volatile-*` with enough memory). An invalid `REDIS_URL`, `JWT_SIGNING_KEY` or `STORAGE_ENCRYPTION_KEY` fails at startup; an empty value (`JWT_SIGNING_KEY=`) counts as unset. If Redis is unreachable at runtime, OAuth requests and tool calls fail with `500` within about 4 seconds and recover on their own once Redis is back.
+
+> **Enabling these settings signs everyone out once.** Turning on `REDIS_URL`, setting `JWT_SIGNING_KEY`, or changing either key later invalidates existing sign-ins: connected clients get a `401` on their next call or refresh and must reconnect once. Existing file-store state is not migrated. Plan the switch.
 
 ## Running the Server
 
@@ -187,6 +208,7 @@ docker run --rm -i \
 
 This starts the MCP server on port 8000.
 To override rate limits, also pass `-e RATE_LIMIT_MAX_REQUESTS=<value>` and `-e RATE_LIMIT_WINDOW_MINUTES=<minutes>` (defaults: `120` and `1`).
+To keep sign-ins across container recreation, also pass `-e REDIS_URL=...` (see [Keeping sign-ins across restarts](#keeping-sign-ins-across-restarts-redis)).
 
 ### Running with Docker compose
 
@@ -469,7 +491,7 @@ This section covers building, testing, and contributing to the project.
 src/
 ├── server.py                  # FastMCP app, middleware, route mounting
 ├── config.py                  # Settings via pydantic-settings
-├── auth_provider.py           # Azure OAuth provider (OBO flow)
+├── auth_provider.py           # Azure OAuth provider (OBO flow) + optional Redis state store
 ├── deps.py                    # Shared dependency helpers
 ├── graph_client_manager.py    # Singleton GraphClientManager with per-user OBO clients
 ├── telemetry.py               # OpenTelemetry setup
@@ -481,14 +503,19 @@ src/
     ├── groups.py              # list_my_groups
     ├── plans.py               # plan tools + list_plan_categories
     ├── tasks.py               # task tools + list_task_fields
-    └── buckets.py             # bucket tools
+    ├── buckets.py             # bucket tools
+    └── users.py               # list_users
 tests/
 ├── conftest.py
+├── test_auth_provider.py
 ├── test_buckets_tool.py
+├── test_config.py
 ├── test_groups_tool.py
 ├── test_planner_service.py
 ├── test_plans_tool.py
-└── test_tasks_tool.py
+├── test_redis_storage_integration.py  # needs a real Redis (REDIS_TEST_URL)
+├── test_tasks_tool.py
+└── test_users_tool.py
 ```
 
 ### Installing Dev Dependencies
@@ -509,13 +536,20 @@ With verbose output:
 uv run pytest -v
 ```
 
+`tests/test_redis_storage_integration.py` runs against a real Redis and is skipped unless `REDIS_TEST_URL` is set (CI provides a `redis:7-alpine` service). Point it at a scratch DB — the tests write and delete their own keys:
+
+```bash
+docker run -d --rm --name redis-test -p 6379:6379 redis:7-alpine
+REDIS_TEST_URL=redis://localhost:6379/15 uv run pytest tests/test_redis_storage_integration.py -v
+```
+
 ### Architecture
 
 The server is built with [FastMCP](https://gofastmcp.com) and uses these key patterns:
 
 **Server composition** — Tools are split into five domain routers (`me`, `groups`, `plans`, `tasks`, `buckets`), each a standalone `FastMCP` instance [mounted](https://gofastmcp.com/servers/composition) on the main app. This keeps each domain's tools, imports, and tests isolated.
 
-**Authentication** — The server uses FastMCP's [`OAuthProxy`](https://gofastmcp.com/servers/auth/oauth-proxy) pattern via a custom `AzureProvider`. Azure Entra ID does not support Dynamic Client Registration (DCR), so the provider acts as a DCR-compliant proxy facing MCP clients while using the pre-registered app credentials with Azure. When a tool call arrives, the server exchanges the MCP session token for a Microsoft Graph token via the [On-Behalf-Of flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow), scoped to `Tasks.ReadWrite` and `User.Read`.
+**Authentication** — The server uses FastMCP's [`OAuthProxy`](https://gofastmcp.com/servers/auth/oauth-proxy) pattern via a custom `AzureProvider`. Azure Entra ID does not support Dynamic Client Registration (DCR), so the provider acts as a DCR-compliant proxy facing MCP clients while using the pre-registered app credentials with Azure. When a tool call arrives, the server exchanges the MCP session token for a Microsoft Graph token via the [On-Behalf-Of flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow), scoped to `Tasks.ReadWrite`, `User.Read` and `User.ReadBasic.All`. The proxy's state (client registrations, users' Entra tokens) lives in FastMCP's encrypted file store by default, or in an encrypted Redis store when `REDIS_URL` is set — see [Keeping sign-ins across restarts](#keeping-sign-ins-across-restarts-redis).
 
 **Middleware** — Five [built-in middleware](https://gofastmcp.com/servers/middleware#built-in-middleware) layers are stacked on the server (outermost first):
 
