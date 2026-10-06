@@ -491,7 +491,7 @@ This section covers building, testing, and contributing to the project.
 src/
 ├── server.py                  # FastMCP app, middleware, route mounting
 ├── config.py                  # Settings via pydantic-settings
-├── auth_provider.py           # Azure OAuth provider (OBO flow)
+├── auth_provider.py           # Azure OAuth provider (OBO flow) + optional Redis state store
 ├── deps.py                    # Shared dependency helpers
 ├── graph_client_manager.py    # Singleton GraphClientManager with per-user OBO clients
 ├── telemetry.py               # OpenTelemetry setup
@@ -503,14 +503,19 @@ src/
     ├── groups.py              # list_my_groups
     ├── plans.py               # plan tools + list_plan_categories
     ├── tasks.py               # task tools + list_task_fields
-    └── buckets.py             # bucket tools
+    ├── buckets.py             # bucket tools
+    └── users.py               # list_users
 tests/
 ├── conftest.py
+├── test_auth_provider.py
 ├── test_buckets_tool.py
+├── test_config.py
 ├── test_groups_tool.py
 ├── test_planner_service.py
 ├── test_plans_tool.py
-└── test_tasks_tool.py
+├── test_redis_storage_integration.py  # needs a real Redis (REDIS_TEST_URL)
+├── test_tasks_tool.py
+└── test_users_tool.py
 ```
 
 ### Installing Dev Dependencies
@@ -531,13 +536,20 @@ With verbose output:
 uv run pytest -v
 ```
 
+`tests/test_redis_storage_integration.py` runs against a real Redis and is skipped unless `REDIS_TEST_URL` is set (CI provides a `redis:7-alpine` service). Point it at a scratch DB — the tests write and delete their own keys:
+
+```bash
+docker run -d --rm --name redis-test -p 6379:6379 redis:7-alpine
+REDIS_TEST_URL=redis://localhost:6379/15 uv run pytest tests/test_redis_storage_integration.py -v
+```
+
 ### Architecture
 
 The server is built with [FastMCP](https://gofastmcp.com) and uses these key patterns:
 
 **Server composition** — Tools are split into five domain routers (`me`, `groups`, `plans`, `tasks`, `buckets`), each a standalone `FastMCP` instance [mounted](https://gofastmcp.com/servers/composition) on the main app. This keeps each domain's tools, imports, and tests isolated.
 
-**Authentication** — The server uses FastMCP's [`OAuthProxy`](https://gofastmcp.com/servers/auth/oauth-proxy) pattern via a custom `AzureProvider`. Azure Entra ID does not support Dynamic Client Registration (DCR), so the provider acts as a DCR-compliant proxy facing MCP clients while using the pre-registered app credentials with Azure. When a tool call arrives, the server exchanges the MCP session token for a Microsoft Graph token via the [On-Behalf-Of flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow), scoped to `Tasks.ReadWrite` and `User.Read`.
+**Authentication** — The server uses FastMCP's [`OAuthProxy`](https://gofastmcp.com/servers/auth/oauth-proxy) pattern via a custom `AzureProvider`. Azure Entra ID does not support Dynamic Client Registration (DCR), so the provider acts as a DCR-compliant proxy facing MCP clients while using the pre-registered app credentials with Azure. When a tool call arrives, the server exchanges the MCP session token for a Microsoft Graph token via the [On-Behalf-Of flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-on-behalf-of-flow), scoped to `Tasks.ReadWrite`, `User.Read` and `User.ReadBasic.All`. The proxy's state (client registrations, users' Entra tokens) lives in FastMCP's encrypted file store by default, or in an encrypted Redis store when `REDIS_URL` is set — see [Keeping sign-ins across restarts](#keeping-sign-ins-across-restarts-redis).
 
 **Middleware** — Five [built-in middleware](https://gofastmcp.com/servers/middleware#built-in-middleware) layers are stacked on the server (outermost first):
 
