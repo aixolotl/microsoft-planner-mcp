@@ -20,6 +20,36 @@ MODULE = "src.auth_provider"
 # already-created provider and miss whether new settings are forwarded.
 # Docs: https://docs.python.org/3/library/importlib.html#importlib.reload
 
+FERNET_KEY = "fXpQ0Ul6ZJ8fKk5q8D0v0b7n7cK4l9sQ3m2a1b0c9d8="
+STORAGE_ENV = ("REDIS_URL", "JWT_SIGNING_KEY", "STORAGE_ENCRYPTION_KEY")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def make_provider_kwargs(monkeypatch, **env):
+    """Reload src.auth_provider under the given env; return AzureProvider's kwargs."""
+    for name in STORAGE_ENV:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+    for name, value in env.items():
+        monkeypatch.setenv(name, value)
+
+    settings = config_module.Settings(_env_file=None)
+    original_settings = config_module.settings
+    try:
+        with patch.object(config_module, "settings", settings), patch(
+            "fastmcp.server.auth.providers.azure.AzureProvider"
+        ) as mock_provider:
+            importlib.reload(importlib.import_module(MODULE))
+        mock_provider.assert_called_once()
+        return mock_provider.call_args.kwargs
+    finally:
+        config_module.settings = original_settings
+        importlib.reload(sys.modules[MODULE])
+
 
 # ---------------------------------------------------------------------------
 # Tests: settings
@@ -60,57 +90,10 @@ def test_settings_reads_lowercase_require_authorization_consent_env(monkeypatch)
 
 def test_auth_provider_passes_configured_require_authorization_consent(monkeypatch):
     monkeypatch.delenv("REQUIRE_AUTHORIZATION_CONSENT", raising=False)
-    monkeypatch.setenv("require_authorization_consent", "false")
 
-    settings = config_module.Settings(_env_file=None)
-    original_settings = config_module.settings
-    existing_module = sys.modules.get(MODULE)
+    kwargs = make_provider_kwargs(monkeypatch, require_authorization_consent="false")
 
-    try:
-        with patch.object(config_module, "settings", settings), patch(
-            "fastmcp.server.auth.providers.azure.AzureProvider"
-        ) as mock_provider:
-            if existing_module is None:
-                importlib.import_module(MODULE)
-            else:
-                importlib.reload(existing_module)
-
-        mock_provider.assert_called_once()
-        assert mock_provider.call_args.kwargs["require_authorization_consent"] is False
-    finally:
-        config_module.settings = original_settings
-        if MODULE in sys.modules:
-            importlib.reload(sys.modules[MODULE])
-
-
-# ---------------------------------------------------------------------------
-# Helpers: OAuth proxy state storage
-# ---------------------------------------------------------------------------
-
-FERNET_KEY = "fXpQ0Ul6ZJ8fKk5q8D0v0b7n7cK4l9sQ3m2a1b0c9d8="
-STORAGE_ENV = ("REDIS_URL", "JWT_SIGNING_KEY", "STORAGE_ENCRYPTION_KEY")
-
-
-def make_provider_kwargs(monkeypatch, **env):
-    """Reload src.auth_provider under the given env; return AzureProvider's kwargs."""
-    for name in STORAGE_ENV:
-        monkeypatch.delenv(name, raising=False)
-        monkeypatch.delenv(name.lower(), raising=False)
-    for name, value in env.items():
-        monkeypatch.setenv(name, value)
-
-    settings = config_module.Settings(_env_file=None)
-    original_settings = config_module.settings
-    try:
-        with patch.object(config_module, "settings", settings), patch(
-            "fastmcp.server.auth.providers.azure.AzureProvider"
-        ) as mock_provider:
-            importlib.reload(importlib.import_module(MODULE))
-        mock_provider.assert_called_once()
-        return mock_provider.call_args.kwargs
-    finally:
-        config_module.settings = original_settings
-        importlib.reload(sys.modules[MODULE])
+    assert kwargs["require_authorization_consent"] is False
 
 
 # ---------------------------------------------------------------------------
