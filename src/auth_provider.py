@@ -62,15 +62,16 @@ def _redis_client_storage() -> FernetEncryptionWrapper | None:
         # drops TLS, so a rediss:// URL (Azure Redis) would connect in plaintext
         # and fail. redis-py's from_url honours the scheme.
         # Explicit outage budget: every tool call reads token state from Redis,
-        # so a slow or unreachable Redis must fail fast (500, client retries)
-        # rather than stall on redis-py's implicit 5 s timeouts x 10 retries.
+        # so a hung Redis must fail fast (500, the client retries) — measured
+        # ~4 s per request with this budget. One retry still covers a stale
+        # pooled connection (e.g. Azure dropping idle sockets).
         key_value=RedisStore(
             client=Redis.from_url(
                 str(settings.REDIS_URL),
                 decode_responses=True,
                 socket_connect_timeout=2,
                 socket_timeout=2,
-                retry=Retry(ExponentialWithJitterBackoff(base=0.1, cap=0.5), retries=2),
+                retry=Retry(ExponentialWithJitterBackoff(base=0.1, cap=0.5), retries=1),
             )
         ),
         fernet=Fernet(key),

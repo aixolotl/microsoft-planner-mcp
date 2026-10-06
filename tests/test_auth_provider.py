@@ -144,7 +144,7 @@ def test_redis_client_bounds_outage_latency(monkeypatch):
     pool = kwargs["client_storage"].key_value._client.connection_pool
     assert pool.connection_kwargs["socket_connect_timeout"] == 2
     assert pool.connection_kwargs["socket_timeout"] == 2
-    assert pool.connection_kwargs["retry"].get_retries() == 2
+    assert pool.connection_kwargs["retry"].get_retries() == 1
 
 
 def test_jwt_signing_key_is_forwarded_derived_once(monkeypatch):
