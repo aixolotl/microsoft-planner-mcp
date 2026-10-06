@@ -13,6 +13,24 @@ jobs:
   build-and-test:
     runs-on: ubuntu-24.04
 
+    # Real Redis for tests/test_redis_storage_integration.py, which skips
+    # without REDIS_TEST_URL. A mock cannot show OAuth state surviving a
+    # restart or Redis applying FastMCP's TTLs.
+    # Docs: https://docs.github.com/en/actions/use-cases-and-examples/using-containerized-services/creating-redis-service-containers
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+
+    env:
+      REDIS_TEST_URL: redis://localhost:6379/15
+
     steps:
       - uses: actions/checkout@v4
 

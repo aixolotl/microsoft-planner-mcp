@@ -41,4 +41,6 @@ filterwarnings = [
     "ignore::DeprecationWarning:kiota_abstractions",
     # msgraph-sdk generated request-configuration subclasses fire warn() in class bodies (SDK bug)
     "ignore::DeprecationWarning:msgraph",
+    # py-key-value-aio's RedisStore calls redis-py's deprecated setex() (library bug)
+    "ignore::DeprecationWarning:key_value",
 ]
