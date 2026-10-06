@@ -88,3 +88,83 @@ def test_rate_limit_rejects_non_positive(monkeypatch, env_var, env_value):
 
     with pytest.raises(ValidationError):
         config_module.Settings(_env_file=None)
+
+
+# ---------------------------------------------------------------------------
+# Tests: OAuth proxy state storage settings
+# ---------------------------------------------------------------------------
+
+# A valid Fernet key (32 url-safe base64 bytes). Fernet rejects anything else,
+# so tests that need a key must use a real one.
+# Docs: https://cryptography.io/en/latest/fernet/#cryptography.fernet.Fernet
+FERNET_KEY = "fXpQ0Ul6ZJ8fKk5q8D0v0b7n7cK4l9sQ3m2a1b0c9d8="
+STORAGE_ENV = ("REDIS_URL", "JWT_SIGNING_KEY", "STORAGE_ENCRYPTION_KEY")
+
+
+def clear_storage_env(monkeypatch):
+    for name in STORAGE_ENV:
+        monkeypatch.delenv(name, raising=False)
+        monkeypatch.delenv(name.lower(), raising=False)
+
+
+def test_storage_settings_default_to_none(monkeypatch):
+    clear_storage_env(monkeypatch)
+
+    settings = config_module.Settings(_env_file=None)
+
+    assert (settings.REDIS_URL, settings.JWT_SIGNING_KEY, settings.STORAGE_ENCRYPTION_KEY) == (
+        None,
+        None,
+        None,
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["redis://localhost:6379/1", "rediss://:pw@example.redis.cache.windows.net:6380/0"],
+    ids=["redis-plain", "rediss-tls"],
+)
+def test_redis_url_accepts_redis_and_rediss(monkeypatch, url):
+    clear_storage_env(monkeypatch)
+    monkeypatch.setenv("REDIS_URL", url)
+
+    settings = config_module.Settings(_env_file=None)
+
+    assert str(settings.REDIS_URL) == url
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["http://:s3cret-pw@redis:6379", "s3cret-pw@redis:6379"],
+    ids=["wrong-scheme", "no-scheme"],
+)
+def test_invalid_redis_url_fails_without_leaking_it(monkeypatch, url):
+    # REDIS_URL carries the Redis password. pydantic echoes input_value in
+    # errors by default, which would print the credential to startup logs.
+    clear_storage_env(monkeypatch)
+    monkeypatch.setenv("REDIS_URL", url)
+
+    with pytest.raises(ValidationError) as exc:
+        config_module.Settings(_env_file=None)
+
+    assert "REDIS_URL" in str(exc.value)
+    assert "s3cret-pw" not in str(exc.value)
+
+
+def test_storage_encryption_key_without_redis_url_fails(monkeypatch):
+    # The key only ever applies to the Redis store; set alone it would be a
+    # silent no-op, so startup refuses it.
+    clear_storage_env(monkeypatch)
+    monkeypatch.setenv("STORAGE_ENCRYPTION_KEY", FERNET_KEY)
+
+    with pytest.raises(ValidationError, match="STORAGE_ENCRYPTION_KEY requires REDIS_URL"):
+        config_module.Settings(_env_file=None)
+
+
+def test_invalid_storage_encryption_key_fails(monkeypatch):
+    clear_storage_env(monkeypatch)
+    monkeypatch.setenv("REDIS_URL", "redis://localhost:6379/1")
+    monkeypatch.setenv("STORAGE_ENCRYPTION_KEY", "not-a-fernet-key")
+
+    with pytest.raises(ValidationError, match="STORAGE_ENCRYPTION_KEY"):
+        config_module.Settings(_env_file=None)
