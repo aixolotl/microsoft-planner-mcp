@@ -183,9 +183,13 @@ def test_empty_storage_setting_means_unset(monkeypatch, name):
     assert getattr(settings, name) is None
 
 
-def test_short_jwt_signing_key_fails(monkeypatch):
+@pytest.mark.parametrize(
+    "value", ["too-short", " " * 40], ids=["too-short", "whitespace-only"]
+)
+def test_weak_jwt_signing_key_fails(monkeypatch, value):
+    # Whitespace passes min_length but is as predictable as an empty key.
     clear_storage_env(monkeypatch)
-    monkeypatch.setenv("JWT_SIGNING_KEY", "too-short")
+    monkeypatch.setenv("JWT_SIGNING_KEY", value)
 
     with pytest.raises(ValidationError, match="JWT_SIGNING_KEY"):
         config_module.Settings(_env_file=None)

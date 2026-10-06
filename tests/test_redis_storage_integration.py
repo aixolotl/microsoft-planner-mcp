@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import time
 import uuid
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
+import fastmcp
 import pytest
 from cryptography.fernet import Fernet
+from fastmcp.server.auth.oauth_proxy.models import ClientCode
 from fastmcp.server.auth.providers.azure import AzureProvider
 from mcp.shared.auth import OAuthClientInformationFull
 from redis.asyncio import Redis
@@ -40,7 +43,8 @@ def make_storage(monkeypatch):
 
 
 def make_provider(monkeypatch) -> AzureProvider:
-    return AzureProvider(
+    """A provider as one server process builds it."""
+    provider = AzureProvider(
         client_id="test-client-id",
         client_secret="test-client-secret",
         tenant_id="test-tenant-id",
@@ -48,6 +52,10 @@ def make_provider(monkeypatch) -> AzureProvider:
         required_scopes=["mcp-access"],
         client_storage=make_storage(monkeypatch),
     )
+    # The server calls get_routes() at startup; it initialises the JWT issuer
+    # that token issuance and refresh need.
+    provider.get_routes()
+    return provider
 
 
 def make_client(client_id: str) -> OAuthClientInformationFull:
@@ -83,6 +91,57 @@ async def test_client_registered_before_restart_is_known_after(monkeypatch):
         await raw.aclose()
     assert found is not None and found.client_id == client_id
     assert in_redis == 1
+
+
+async def test_refresh_token_issued_before_restart_refreshes_after(monkeypatch, tmp_path):
+    # The acceptance criterion end to end through FastMCP's real token code:
+    # tokens issued by one process, redeemed by a fresh one on the same Redis.
+    # Each "process" gets its own empty FastMCP home (= a recreated container),
+    # so nothing can survive via the default file store. Only the upstream
+    # Entra token endpoint is stubbed.
+    client = make_client(f"test-{uuid.uuid4()}")
+    monkeypatch.setattr(fastmcp.settings, "home", tmp_path / "before")
+    before = make_provider(monkeypatch)
+    await before.register_client(client)
+    # FastMCP stores this ClientCode in its browser callback after the Entra
+    # sign-in; seeding it directly stands in for the interactive login.
+    code = f"test-{uuid.uuid4()}"
+    await before._code_store.put(
+        key=code,
+        value=ClientCode(
+            code=code,
+            client_id=client.client_id,
+            redirect_uri="http://localhost:59999/callback",
+            code_challenge=None,
+            code_challenge_method="S256",
+            scopes=["mcp-access"],
+            idp_tokens={"access_token": "entra-at", "refresh_token": "entra-rt", "expires_in": 3600},
+            expires_at=time.time() + 300,
+            created_at=time.time(),
+        ),
+    )
+    issued = await before.exchange_authorization_code(
+        client, await before.load_authorization_code(client, code)
+    )
+
+    monkeypatch.setattr(fastmcp.settings, "home", tmp_path / "restarted")
+    restarted = make_provider(monkeypatch)
+    upstream = MagicMock()
+    upstream.refresh_token = AsyncMock(
+        return_value={"access_token": "entra-at-2", "refresh_token": "entra-rt-2", "expires_in": 3600}
+    )
+    with patch.object(restarted, "_create_upstream_oauth_client", return_value=upstream):
+        known_client = await restarted.get_client(client.client_id)
+        loaded = await restarted.load_refresh_token(known_client, issued.refresh_token)
+        assert loaded is not None, "refresh token issued before the restart was lost"
+        refreshed = await restarted.exchange_refresh_token(known_client, loaded, loaded.scopes)
+
+    raw = Redis.from_url(REDIS_TEST_URL, decode_responses=True)
+    await raw.delete(f"mcp-oauth-proxy-clients::{client.client_id}")
+    await raw.aclose()
+    # The restarted process decrypted the upstream refresh token from Redis.
+    assert upstream.refresh_token.await_args.kwargs["refresh_token"] == "entra-rt"
+    assert refreshed.access_token and refreshed.access_token != issued.access_token
 
 
 # ---------------------------------------------------------------------------

@@ -97,6 +97,14 @@ class Settings(BaseSettings):
                 raise ValueError("REDIS_URL path must be a DB index, e.g. /1")
         return value
 
+    @field_validator("JWT_SIGNING_KEY")
+    @classmethod
+    def _non_blank_signing_key(cls, value: SecretStr | None) -> SecretStr | None:
+        # Whitespace passes min_length but is as predictable as an empty key.
+        if value is not None and not value.get_secret_value().strip():
+            raise ValueError("JWT_SIGNING_KEY must not be blank")
+        return value
+
     @field_validator("STORAGE_ENCRYPTION_KEY")
     @classmethod
     def _valid_fernet_key(cls, value: SecretStr | None) -> SecretStr | None:
