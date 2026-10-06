@@ -39,11 +39,14 @@ def make_provider_kwargs(monkeypatch, **env):
 
     settings = config_module.Settings(_env_file=None)
     original_settings = config_module.settings
+    # Import BEFORE patching: a first import_module inside the patch would
+    # execute the module, and the reload execute it again — two calls.
+    module = importlib.import_module(MODULE)
     try:
         with patch.object(config_module, "settings", settings), patch(
             "fastmcp.server.auth.providers.azure.AzureProvider"
         ) as mock_provider:
-            importlib.reload(importlib.import_module(MODULE))
+            importlib.reload(module)
         mock_provider.assert_called_once()
         return mock_provider.call_args.kwargs
     finally:
@@ -132,10 +135,29 @@ def test_redis_url_wires_encrypted_redis_store(monkeypatch, url, connection_clas
     assert pool.connection_kwargs["db"] == db
 
 
-def test_jwt_signing_key_is_forwarded(monkeypatch):
-    kwargs = make_provider_kwargs(monkeypatch, JWT_SIGNING_KEY="a-long-fixed-signing-secret")
+def test_redis_client_bounds_outage_latency(monkeypatch):
+    # Every tool call reads the token mapping from Redis. Left to redis-py's
+    # implicit defaults (5 s timeouts, up to 10 retries), a black-holed Redis
+    # would stall every request; pin a short, explicit budget instead.
+    kwargs = make_provider_kwargs(monkeypatch, REDIS_URL="redis://localhost:6379/1")
 
-    assert kwargs["jwt_signing_key"] == "a-long-fixed-signing-secret"
+    pool = kwargs["client_storage"].key_value._client.connection_pool
+    assert pool.connection_kwargs["socket_connect_timeout"] == 2
+    assert pool.connection_kwargs["socket_timeout"] == 2
+    assert pool.connection_kwargs["retry"].get_retries() == 2
+
+
+def test_jwt_signing_key_is_forwarded_derived_once(monkeypatch):
+    # Bytes are used verbatim by FastMCP; a string would make it re-run the
+    # same 1M-iteration PBKDF2. Same derivation, so the signing key is unchanged.
+    kwargs = make_provider_kwargs(
+        monkeypatch, JWT_SIGNING_KEY="a-fixed-signing-secret-of-at-least-32-chars"
+    )
+
+    assert kwargs["jwt_signing_key"] == derive_jwt_key(
+        low_entropy_material="a-fixed-signing-secret-of-at-least-32-chars",
+        salt="fastmcp-jwt-signing-key",
+    )
 
 
 def derived_storage_key(jwt_key: bytes) -> bytes:
@@ -159,10 +181,10 @@ def derived_storage_key(jwt_key: bytes) -> bytes:
             ),
         ),
         (
-            {"JWT_SIGNING_KEY": "a-long-fixed-signing-secret"},
+            {"JWT_SIGNING_KEY": "a-fixed-signing-secret-of-at-least-32-chars"},
             derived_storage_key(
                 derive_jwt_key(
-                    low_entropy_material="a-long-fixed-signing-secret",
+                    low_entropy_material="a-fixed-signing-secret-of-at-least-32-chars",
                     salt="fastmcp-jwt-signing-key",
                 )
             ),

@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from cryptography.fernet import Fernet
-from pydantic import PositiveInt, RedisDsn, SecretStr, field_validator, model_validator
+from pydantic import (
+    Field,
+    PositiveInt,
+    RedisDsn,
+    SecretStr,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,8 +21,15 @@ class Settings(BaseSettings):
     # echoes the raw input in validation errors by default — a malformed URL
     # would print the credential to the startup log.
     # Docs: https://docs.pydantic.dev/latest/api/config/#pydantic.config.ConfigDict.hide_input_in_errors
+    # env_ignore_empty: `JWT_SIGNING_KEY=` (an uncommented .env.example line or
+    # an unset compose ${VAR}) must mean "unset", not SecretStr('') — an empty
+    # signing key would derive a publicly computable Redis encryption key.
+    # Docs: https://docs.pydantic.dev/latest/concepts/pydantic_settings/#parsing-environment-variable-values
     model_config = SettingsConfigDict(
-        env_file=".env", env_file_encoding="utf-8", hide_input_in_errors=True
+        env_file=".env",
+        env_file_encoding="utf-8",
+        hide_input_in_errors=True,
+        env_ignore_empty=True,
     )
 
     # Azure Entra ID app registration credentials. Used by AzureProvider
@@ -61,16 +75,27 @@ class Settings(BaseSettings):
     # redis:// or rediss:// (TLS, required by Azure Redis); the path selects
     # the DB index so the store can share a Redis with other services.
     # Docs: https://gofastmcp.com/servers/auth/oauth-proxy
-    REDIS_URL: RedisDsn | None = None
+    # repr=False: the URL carries the Redis password; keep it out of reprs/logs.
+    REDIS_URL: RedisDsn | None = Field(default=None, repr=False)
 
     # Fixed secret for signing FastMCP's tokens. Unset, it is derived from
-    # CLIENT_SECRET, so rotating the Entra secret logs every user out.
-    JWT_SIGNING_KEY: SecretStr | None = None
+    # CLIENT_SECRET, so rotating the Entra secret logs every user out. Also the
+    # root of the derived Redis encryption key, so a short one is refused.
+    JWT_SIGNING_KEY: SecretStr | None = Field(default=None, min_length=32)
 
     # Fernet key encrypting the Redis store. Unset, it is derived the way
     # FastMCP derives its default store key. Only meaningful with REDIS_URL.
     # Docs: https://cryptography.io/en/latest/fernet/
     STORAGE_ENCRYPTION_KEY: SecretStr | None = None
+
+    @field_validator("REDIS_URL")
+    @classmethod
+    def _numeric_db_path(cls, value: RedisDsn | None) -> RedisDsn | None:
+        # redis-py ignores a non-numeric path and silently uses DB 0.
+        if value is not None and value.path not in (None, "", "/"):
+            if not value.path.lstrip("/").isdigit():
+                raise ValueError("REDIS_URL path must be a DB index, e.g. /1")
+        return value
 
     @field_validator("STORAGE_ENCRYPTION_KEY")
     @classmethod

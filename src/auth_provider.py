@@ -12,8 +12,24 @@ from fastmcp.server.auth.providers.azure import AzureProvider
 from key_value.aio.stores.redis import RedisStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from redis.asyncio import Redis
+from redis.asyncio.retry import Retry
+from redis.backoff import ExponentialWithJitterBackoff
 
 from .config import settings
+
+
+_JWT_SALT = "fastmcp-jwt-signing-key"
+
+# Derived once and handed to FastMCP as bytes, which it uses verbatim
+# (oauth_proxy/proxy.py). Passing the string would make FastMCP re-run the
+# same 1M-iteration PBKDF2 at import — slower cold starts on scale-to-zero.
+_jwt_signing_key: bytes | None = (
+    derive_jwt_key(
+        low_entropy_material=settings.JWT_SIGNING_KEY.get_secret_value(), salt=_JWT_SALT
+    )
+    if settings.JWT_SIGNING_KEY is not None
+    else None
+)
 
 
 def _redis_client_storage() -> FernetEncryptionWrapper | None:
@@ -34,15 +50,9 @@ def _redis_client_storage() -> FernetEncryptionWrapper | None:
         # Mirror FastMCP's default-store key derivation (oauth_proxy/proxy.py):
         # storage key from the JWT signing key, itself from JWT_SIGNING_KEY or
         # CLIENT_SECRET. Without this, no key scheme would match FastMCP's.
-        if settings.JWT_SIGNING_KEY is not None:
-            jwt_key = derive_jwt_key(
-                low_entropy_material=settings.JWT_SIGNING_KEY.get_secret_value(),
-                salt="fastmcp-jwt-signing-key",
-            )
-        else:
-            jwt_key = derive_jwt_key(
-                high_entropy_material=settings.CLIENT_SECRET, salt="fastmcp-jwt-signing-key"
-            )
+        jwt_key = _jwt_signing_key or derive_jwt_key(
+            high_entropy_material=settings.CLIENT_SECRET, salt=_JWT_SALT
+        )
         key = derive_jwt_key(
             high_entropy_material=jwt_key.decode(), salt="fastmcp-storage-encryption-key"
         )
@@ -51,7 +61,18 @@ def _redis_client_storage() -> FernetEncryptionWrapper | None:
         # RedisStore(url=...) rebuilds the client from host/port/db/password and
         # drops TLS, so a rediss:// URL (Azure Redis) would connect in plaintext
         # and fail. redis-py's from_url honours the scheme.
-        key_value=RedisStore(client=Redis.from_url(str(settings.REDIS_URL), decode_responses=True)),
+        # Explicit outage budget: every tool call reads token state from Redis,
+        # so a slow or unreachable Redis must fail fast (500, client retries)
+        # rather than stall on redis-py's implicit 5 s timeouts x 10 retries.
+        key_value=RedisStore(
+            client=Redis.from_url(
+                str(settings.REDIS_URL),
+                decode_responses=True,
+                socket_connect_timeout=2,
+                socket_timeout=2,
+                retry=Retry(ExponentialWithJitterBackoff(base=0.1, cap=0.5), retries=2),
+            )
+        ),
         fernet=Fernet(key),
         # A rotated key turns old entries into cache misses (users reconnect)
         # instead of crashing the token endpoint — FastMCP's default behaviour.
@@ -91,7 +112,5 @@ auth = AzureProvider(
     require_authorization_consent=settings.REQUIRE_AUTHORIZATION_CONSENT,
     # Both None keeps FastMCP's defaults (file store, key from CLIENT_SECRET).
     client_storage=_redis_client_storage(),
-    jwt_signing_key=(
-        settings.JWT_SIGNING_KEY.get_secret_value() if settings.JWT_SIGNING_KEY else None
-    ),
+    jwt_signing_key=_jwt_signing_key,
 )

@@ -168,3 +168,48 @@ def test_invalid_storage_encryption_key_fails(monkeypatch):
 
     with pytest.raises(ValidationError, match="STORAGE_ENCRYPTION_KEY"):
         config_module.Settings(_env_file=None)
+
+
+@pytest.mark.parametrize("name", STORAGE_ENV, ids=["redis-url", "jwt-key", "encryption-key"])
+def test_empty_storage_setting_means_unset(monkeypatch, name):
+    # `JWT_SIGNING_KEY=` (an uncommented .env.example line, or an unset
+    # compose ${VAR}) must not become SecretStr(''): an empty signing key
+    # would derive a publicly computable key for the Redis store.
+    clear_storage_env(monkeypatch)
+    monkeypatch.setenv(name, "")
+
+    settings = config_module.Settings(_env_file=None)
+
+    assert getattr(settings, name) is None
+
+
+def test_short_jwt_signing_key_fails(monkeypatch):
+    clear_storage_env(monkeypatch)
+    monkeypatch.setenv("JWT_SIGNING_KEY", "too-short")
+
+    with pytest.raises(ValidationError, match="JWT_SIGNING_KEY"):
+        config_module.Settings(_env_file=None)
+
+
+@pytest.mark.parametrize(
+    "url",
+    ["redis://localhost:6379/abc", "redis://localhost:6379/1/extra"],
+    ids=["non-numeric-db", "nested-path"],
+)
+def test_redis_url_with_invalid_db_path_fails(monkeypatch, url):
+    # redis-py ignores a non-numeric path and silently uses DB 0 — the DB
+    # another service on a shared Redis is most likely to be using.
+    clear_storage_env(monkeypatch)
+    monkeypatch.setenv("REDIS_URL", url)
+
+    with pytest.raises(ValidationError, match="REDIS_URL"):
+        config_module.Settings(_env_file=None)
+
+
+def test_settings_repr_hides_redis_password(monkeypatch):
+    clear_storage_env(monkeypatch)
+    monkeypatch.setenv("REDIS_URL", "rediss://:s3cret-pw@example.redis.cache.windows.net:6380/0")
+
+    settings = config_module.Settings(_env_file=None)
+
+    assert "s3cret-pw" not in repr(settings)

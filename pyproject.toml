@@ -6,7 +6,9 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 dependencies = [
-    "fastmcp[apps]>=3.2.3",
+    # <4: src/auth_provider.py mirrors FastMCP's store-key derivation (salts,
+    # KDF); a major release could change it and sign every Redis user out.
+    "fastmcp[apps]>=3.2.3,<4",
     "msgraph-sdk>=1.55.0",
     "odata-v4-query>=0.4.1",
     "py-key-value-aio[redis]>=0.4.4,<0.5.0",
@@ -42,5 +44,5 @@ filterwarnings = [
     # msgraph-sdk generated request-configuration subclasses fire warn() in class bodies (SDK bug)
     "ignore::DeprecationWarning:msgraph",
     # py-key-value-aio's RedisStore calls redis-py's deprecated setex() (library bug)
-    "ignore::DeprecationWarning:key_value",
+    "ignore:Call to deprecated setex:DeprecationWarning:key_value",
 ]

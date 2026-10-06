@@ -7,6 +7,7 @@ import uuid
 from unittest.mock import patch
 
 import pytest
+from cryptography.fernet import Fernet
 from fastmcp.server.auth.providers.azure import AzureProvider
 from mcp.shared.auth import OAuthClientInformationFull
 from redis.asyncio import Redis
@@ -108,3 +109,21 @@ async def test_entries_are_encrypted_and_honour_ttl(monkeypatch):
     assert "__encrypted_data__" in stored
     assert "entra-rt-plaintext" not in stored
     assert 0 < ttl <= 60
+
+
+async def test_rotated_encryption_key_reads_as_a_miss(monkeypatch):
+    # After a key change, old entries must read as "not found" (the client
+    # gets 401 and reconnects) rather than raise and turn /token into a 500.
+    key = f"test-{uuid.uuid4()}"
+    monkeypatch.setenv("STORAGE_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    await make_storage(monkeypatch).put(key=key, value={"v": 1}, collection="mcp-test")
+
+    monkeypatch.setenv("STORAGE_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    try:
+        found = await make_storage(monkeypatch).get(key=key, collection="mcp-test")
+    finally:
+        raw = Redis.from_url(REDIS_TEST_URL, decode_responses=True)
+        await raw.delete(f"mcp-test::{key}")
+        await raw.aclose()
+
+    assert found is None
