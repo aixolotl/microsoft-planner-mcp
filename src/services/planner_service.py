@@ -223,7 +223,7 @@ class PlannerService:
     def _as_datetime(value: str, like: datetime) -> str | datetime:
         """Parse an ISO date/datetime literal, matching ``like``'s awareness (UTC when unzoned)."""
         try:
-            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+            parsed = datetime.fromisoformat(value.strip())
         except ValueError:
             return value
         if like.tzinfo is not None and parsed.tzinfo is None:
