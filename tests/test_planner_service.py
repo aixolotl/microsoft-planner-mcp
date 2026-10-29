@@ -566,3 +566,51 @@ async def test_with_retry_sends_fresh_etag_in_if_match_header(make_odata_error):
     assert captured_configs[0].headers.get("if-match") == {'"etag-stale"'}
     # Retry attempt uses the refreshed etag
     assert captured_configs[1].headers.get("if-match") == {'"etag-refreshed"'}
+
+
+# -- date comparison (aixolotl/aix-chat#1009) --
+# The model compares dates with a quoted ISO literal; Graph returns datetimes.
+# "dueDateTime le '2026-11-30'" raised "Incompatible types … datetime and str".
+
+
+@pytest.mark.parametrize("literal,expected_titles", [
+    ("'2026-11-30'", ["Due Nov 13"]),
+    ("'2026-11-30T00:00:00Z'", ["Due Nov 13"]),
+    ("'2026-12-31T23:59:59+01:00'", ["Due Nov 13", "Due Dec 11"]),
+], ids=["date", "utc-datetime", "offset-datetime"])
+def test_filter_compares_a_datetime_with_an_iso_string(literal, expected_titles):
+    from datetime import datetime, timezone
+
+    nov = _make_task("Due Nov 13")
+    nov.due_date_time = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    dec = _make_task("Due Dec 11")
+    dec.due_date_time = datetime(2026, 12, 11, tzinfo=timezone.utc)
+    none = _make_task("No due date")
+    result = PlannerService.filter_items(
+        [nov, dec, none], filter=f"dueDateTime le {literal}"
+    )
+    assert [t.title for t in result] == expected_titles
+
+
+def test_filter_still_rejects_a_string_that_is_no_date(sample_tasks):
+    from datetime import datetime, timezone
+
+    sample_tasks[0].due_date_time = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    with pytest.raises(ValueError, match="Incompatible types"):
+        PlannerService.filter_items(sample_tasks, filter="dueDateTime le 'soon'")
+
+
+@pytest.mark.parametrize("literal", ["2026-11-30", "2026-11-30T00:00:00Z"], ids=["date", "datetime"])
+def test_filter_accepts_an_unquoted_iso_date(literal):
+    # The model often writes the date bare; the OData parser read it as the
+    # number 2026 and failed on "-11" ("invalid number at position …, got '-30'").
+    from datetime import datetime, timezone
+
+    nov = _make_task("Due Nov 13")
+    nov.due_date_time = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    dec = _make_task("Due Dec 11")
+    dec.due_date_time = datetime(2026, 12, 11, tzinfo=timezone.utc)
+    result = PlannerService.filter_items(
+        [nov, dec], filter=f"dueDateTime le {literal} and title ne 'x-2026-11-30'"
+    )
+    assert [t.title for t in result] == ["Due Nov 13"]

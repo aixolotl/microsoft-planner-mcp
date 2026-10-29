@@ -33,6 +33,11 @@ from ..types import CollectionRequestBuilder
 
 T = TypeVar("T")
 
+# An ISO date or datetime standing alone in a filter (not inside a word or a number).
+_BARE_ISO_DATE = re.compile(
+    r"(?<![\w.:'-])(\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?)(?![\w:'-])"
+)
+
 
 class PlannerService:
     """Planner operations over a caller-supplied GraphServiceClient."""
@@ -201,6 +206,32 @@ class PlannerService:
 
         raise ValueError(f"Unsupported filter node type: {node.type_!r}")
 
+    @staticmethod
+    def _quote_bare_dates(expression: str) -> str:
+        """Quote ISO dates written bare (``dueDateTime le 2026-11-30``), outside quoted strings.
+
+        The parser reads a bare date as the number 2026 and fails on ``-11``;
+        quoted, it compares as a datetime (``_as_datetime``).
+        """
+        parts = re.split(r"('(?:[^']|'')*')", expression)
+        return "".join(
+            part if i % 2 else _BARE_ISO_DATE.sub(r"'\1'", part)
+            for i, part in enumerate(parts)
+        )
+
+    @staticmethod
+    def _as_datetime(value: str, like: datetime) -> str | datetime:
+        """Parse an ISO date/datetime literal, matching ``like``'s awareness (UTC when unzoned)."""
+        try:
+            parsed = datetime.fromisoformat(value.strip())
+        except ValueError:
+            return value
+        if like.tzinfo is not None and parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        if like.tzinfo is None and parsed.tzinfo is not None:
+            return parsed.replace(tzinfo=None)
+        return parsed
+
     @classmethod
     def _eval_function(cls, node: FilterNode, item: Any) -> bool:
         """Evaluate a function call node (startswith, endswith, contains)."""
@@ -240,6 +271,14 @@ class PlannerService:
         # Comparison: eq, ne, gt, ge, lt, le
         left = cls._eval_node(node.left, item)
         right = cls._eval_node(node.right, item)
+
+        # A datetime field compared with a quoted ISO literal
+        # (``dueDateTime le '2026-11-30'``) compares as datetimes; a string
+        # that is no date falls through to the type error below.
+        if isinstance(left, datetime) and isinstance(right, str):
+            right = cls._as_datetime(right, left)
+        elif isinstance(right, datetime) and isinstance(left, str):
+            left = cls._as_datetime(left, right)
 
         # Case-insensitive string comparison for LLM ergonomics.
         # Without this, ``title eq 'hello'`` would not match ``title='Hello'``.
@@ -313,7 +352,7 @@ class PlannerService:
         result = items
 
         if filter:
-            ast = cls._filter_parser.parse(filter)
+            ast = cls._filter_parser.parse(cls._quote_bare_dates(filter))
             result = [item for item in result if cls._eval_node(ast, item)]
 
         if search:
