@@ -598,3 +598,19 @@ def test_filter_still_rejects_a_string_that_is_no_date(sample_tasks):
     sample_tasks[0].due_date_time = datetime(2026, 11, 13, tzinfo=timezone.utc)
     with pytest.raises(ValueError, match="Incompatible types"):
         PlannerService.filter_items(sample_tasks, filter="dueDateTime le 'soon'")
+
+
+@pytest.mark.parametrize("literal", ["2026-11-30", "2026-11-30T00:00:00Z"], ids=["date", "datetime"])
+def test_filter_accepts_an_unquoted_iso_date(literal):
+    # The model often writes the date bare; the OData parser read it as the
+    # number 2026 and failed on "-11" ("invalid number at position …, got '-30'").
+    from datetime import datetime, timezone
+
+    nov = _make_task("Due Nov 13")
+    nov.due_date_time = datetime(2026, 11, 13, tzinfo=timezone.utc)
+    dec = _make_task("Due Dec 11")
+    dec.due_date_time = datetime(2026, 12, 11, tzinfo=timezone.utc)
+    result = PlannerService.filter_items(
+        [nov, dec], filter=f"dueDateTime le {literal} and title ne 'x-2026-11-30'"
+    )
+    assert [t.title for t in result] == ["Due Nov 13"]

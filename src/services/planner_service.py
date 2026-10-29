@@ -33,6 +33,11 @@ from ..types import CollectionRequestBuilder
 
 T = TypeVar("T")
 
+# An ISO date or datetime standing alone in a filter (not inside a word or a number).
+_BARE_ISO_DATE = re.compile(
+    r"(?<![\w.:'-])(\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})?)?)(?![\w:'-])"
+)
+
 
 class PlannerService:
     """Planner operations over a caller-supplied GraphServiceClient."""
@@ -202,6 +207,19 @@ class PlannerService:
         raise ValueError(f"Unsupported filter node type: {node.type_!r}")
 
     @staticmethod
+    def _quote_bare_dates(expression: str) -> str:
+        """Quote ISO dates written bare (``dueDateTime le 2026-11-30``), outside quoted strings.
+
+        The parser reads a bare date as the number 2026 and fails on ``-11``;
+        quoted, it compares as a datetime (``_as_datetime``).
+        """
+        parts = re.split(r"('(?:[^']|'')*')", expression)
+        return "".join(
+            part if i % 2 else _BARE_ISO_DATE.sub(r"'\1'", part)
+            for i, part in enumerate(parts)
+        )
+
+    @staticmethod
     def _as_datetime(value: str, like: datetime) -> str | datetime:
         """Parse an ISO date/datetime literal, matching ``like``'s awareness (UTC when unzoned)."""
         try:
@@ -334,7 +352,7 @@ class PlannerService:
         result = items
 
         if filter:
-            ast = cls._filter_parser.parse(filter)
+            ast = cls._filter_parser.parse(cls._quote_bare_dates(filter))
             result = [item for item in result if cls._eval_node(ast, item)]
 
         if search:
