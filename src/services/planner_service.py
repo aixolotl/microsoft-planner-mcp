@@ -201,6 +201,19 @@ class PlannerService:
 
         raise ValueError(f"Unsupported filter node type: {node.type_!r}")
 
+    @staticmethod
+    def _as_datetime(value: str, like: datetime) -> str | datetime:
+        """Parse an ISO date/datetime literal, matching ``like``'s awareness (UTC when unzoned)."""
+        try:
+            parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+        except ValueError:
+            return value
+        if like.tzinfo is not None and parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        if like.tzinfo is None and parsed.tzinfo is not None:
+            return parsed.replace(tzinfo=None)
+        return parsed
+
     @classmethod
     def _eval_function(cls, node: FilterNode, item: Any) -> bool:
         """Evaluate a function call node (startswith, endswith, contains)."""
@@ -240,6 +253,14 @@ class PlannerService:
         # Comparison: eq, ne, gt, ge, lt, le
         left = cls._eval_node(node.left, item)
         right = cls._eval_node(node.right, item)
+
+        # A datetime field compared with a quoted ISO literal
+        # (``dueDateTime le '2026-11-30'``) compares as datetimes; a string
+        # that is no date falls through to the type error below.
+        if isinstance(left, datetime) and isinstance(right, str):
+            right = cls._as_datetime(right, left)
+        elif isinstance(right, datetime) and isinstance(left, str):
+            left = cls._as_datetime(left, right)
 
         # Case-insensitive string comparison for LLM ergonomics.
         # Without this, ``title eq 'hello'`` would not match ``title='Hello'``.

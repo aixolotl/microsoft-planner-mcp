@@ -104,7 +104,8 @@ async def list_my_tasks(
                 "OData filter expression. "
                 "Supported operators: eq, ne, gt, ge, lt, le, and, or, not. "
                 "Supported functions: startswith, endswith, contains. "
-                "Example to get all incomplete tasks: \"percentComplete ne 100\"."
+                "Example to get all incomplete tasks: \"percentComplete ne 100\". "
+                "Compare dates with a quoted ISO date: \"dueDateTime le '2026-11-30'\"."
             ),
             examples=["startswith(title, 'Project')", "title eq 'Project X'", "percentComplete ne 100", "startswith(title, 'Project') and percentComplete eq 0"],
         ),
@@ -193,7 +194,8 @@ async def list_tasks(
                 "OData filter expression. "
                 "Supported operators: eq, ne, gt, ge, lt, le, and, or, not. "
                 "Supported functions: startswith, endswith, contains. "
-                "Example to get all incomplete tasks: \"percentComplete ne 100\"."
+                "Example to get all incomplete tasks: \"percentComplete ne 100\". "
+                "Compare dates with a quoted ISO date: \"dueDateTime le '2026-11-30'\"."
             ),
             examples=["startswith(title, 'Project')", "title eq 'Project Task'", "percentComplete eq 0"],
         ),
