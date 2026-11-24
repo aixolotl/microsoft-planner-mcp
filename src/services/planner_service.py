@@ -317,6 +317,35 @@ class PlannerService:
         )
 
     @classmethod
+    def select_with_filter_fields(
+        cls,
+        select: list[str] | None,
+        *,
+        filter: str | None = None,
+        search: str | None = None,
+        search_fields: list[str] | None = None,
+    ) -> list[str] | None:
+        """Add the fields a client-side filter or search reads to a $select list.
+
+        Graph returns only the $select fields, so filter_items() would read
+        None for any other field: ``percentComplete eq 100`` with
+        select "id,title" matched nothing, and ``ne 100`` matched every task.
+        None (no $select, all fields) is returned unchanged.
+        """
+        if select is None:
+            return None
+        needed = list(search_fields or ["title"]) if search else []
+        nodes = [cls._filter_parser.parse(cls._quote_bare_dates(filter))] if filter else []
+        while nodes:
+            node = nodes.pop(0)
+            if node is None:
+                continue
+            if node.type_ == "identifier" and node.value and node.value.lower() not in ("true", "false", "null"):
+                needed.append(node.value)
+            nodes += [node.left, node.right, *(node.arguments or [])]
+        return select + [f for f in dict.fromkeys(needed) if f not in select]
+
+    @classmethod
     def filter_items(
         cls,
         items: list,
