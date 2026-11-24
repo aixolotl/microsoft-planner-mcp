@@ -552,6 +552,26 @@ async def test_update_task_uses_explicit_details_etag(graph_ctx):
     assert result is updated
 
 
+@pytest.mark.parametrize("status,code", [
+    (404, "NotFound"),
+    (403, "Forbidden"),
+], ids=["404-not-found", "403-forbidden"])
+async def test_update_task_details_etag_refresh_error_is_cleaned(status, code, graph_ctx, make_odata_error):
+    # The details ETag refresh runs outside with_retry. Without cleaning, the
+    # raw ODataError (request IDs, timestamp) reached the client.
+    graph_client = make_patching_graph_client()
+    graph_client.planner.tasks.by_planner_task_id.return_value.details.get = AsyncMock(
+        side_effect=make_odata_error(status, code, "The requested item is not found.")
+    )
+
+    with graph_ctx(MODULE, graph_client):
+        with pytest.raises(RuntimeError) as exc_info:
+            await update_task("task-1", '"etag-v1"', description="x")
+
+    assert str(exc_info.value) == f"Graph API error ({status}): The requested item is not found."
+    graph_client.planner.tasks.by_planner_task_id.return_value.details.patch.assert_not_awaited()
+
+
 # ---------------------------------------------------------------------------
 # update_task — combined standard + detail fields
 # ---------------------------------------------------------------------------

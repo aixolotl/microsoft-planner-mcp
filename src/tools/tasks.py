@@ -492,9 +492,15 @@ async def update_task(
             # this fallback, callers that only have the task-level ETag would
             # need an extra round-trip to fetch the details ETag manually.
             # Docs: https://learn.microsoft.com/en-us/graph/api/plannertaskdetails-update
-            resolved_etag = etagDetails or await svc.refresh_etag(
-                details_item.get, f"task details {taskId!r}"
-            )
+            # The refresh GET sits outside with_retry, so its ODataError must be
+            # cleaned here. Without this, a 404/403 reaches the client as the raw
+            # ODataError text with request IDs and a timestamp.
+            try:
+                resolved_etag = etagDetails or await svc.refresh_etag(
+                    details_item.get, f"task details {taskId!r}"
+                )
+            except ODataError as exc:
+                raise RuntimeError(PlannerService.clean_graph_error(exc)) from None
             details_result = await svc.with_retry(
                 resolved_etag,
                 lambda e: details_item.patch(details_body, request_configuration=svc.make_config(e, prefer_representation=True)),
