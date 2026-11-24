@@ -60,7 +60,7 @@ class Settings(BaseSettings):
     # https://gofastmcp.com/servers/auth/oauth-proxy#param-require-authorization-consent
     REQUIRE_AUTHORIZATION_CONSENT: bool = True
 
-    # Sliding-window rate limit applied per client. LLM agents can fan out tool
+    # Sliding-window rate limit applied per signed-in user. LLM agents can fan out tool
     # calls rapidly; these caps prevent exhausting the Microsoft Graph throttling
     # quota (10,000 req/10min per tenant). Without configurable limits, operators
     # cannot tune the ceiling to match their tenant's usage patterns.

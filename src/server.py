@@ -11,6 +11,8 @@ _configure_telemetry()
 import logging
 
 from fastmcp import FastMCP
+from fastmcp.server.dependencies import get_access_token
+from fastmcp.server.middleware import MiddlewareContext
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
 from fastmcp.server.middleware.rate_limiting import SlidingWindowRateLimitingMiddleware
@@ -66,7 +68,17 @@ mcp = FastMCP(
 # Docs: https://gofastmcp.com/servers/middleware#error-handling
 mcp.add_middleware(ErrorHandlingMiddleware(include_traceback=True))
 
-# Enforces a configurable sliding-window rate limit per client. LLM agents can
+def _rate_limit_key(context: MiddlewareContext) -> str:
+    """Rate-limit bucket for a request: the signed-in Entra user (oid claim)."""
+    # Without a key function the middleware counts every request under one
+    # "global" key, so one user's agent uses up the limit for all users.
+    # Docs: https://gofastmcp.com/servers/middleware#rate-limiting
+    token = get_access_token()
+    claims = token.claims if token is not None else {}
+    return str(claims.get("oid") or claims.get("sub") or "anonymous")
+
+
+# Enforces a configurable sliding-window rate limit per signed-in user. LLM agents can
 # fan out tool calls rapidly (e.g. fetching details for every task in a plan).
 # Without this, an unconstrained agent could exhaust the Microsoft Graph
 # throttling quota (10,000 req/10min per tenant), causing 429s for all users.
@@ -74,6 +86,7 @@ mcp.add_middleware(ErrorHandlingMiddleware(include_traceback=True))
 mcp.add_middleware(SlidingWindowRateLimitingMiddleware(
     max_requests=settings.RATE_LIMIT_MAX_REQUESTS,
     window_minutes=settings.RATE_LIMIT_WINDOW_MINUTES,
+    get_client_id=_rate_limit_key,
 ))
 
 # Records wall-clock duration for every MCP operation and emits it to the log.
