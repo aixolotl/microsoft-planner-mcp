@@ -196,6 +196,14 @@ class PlannerService:
                 return False
             if lower == "null":
                 return None
+            # A misspelt or unsupported field must fail, not read as None.
+            # Without this, ``titel eq 'x'`` silently matched no task and
+            # ``titel ne 'x'`` matched every task.
+            if not hasattr(item, cls._to_snake(node.value)) and not hasattr(item, node.value):
+                raise ValueError(
+                    f"Unknown field in filter: {node.value!r}. Use a task field "
+                    "from list_task_fields (detailed: false)."
+                )
             return cls._get_attr(item, node.value)
 
         if node.type_ == "function":

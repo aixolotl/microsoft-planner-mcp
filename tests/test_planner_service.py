@@ -463,6 +463,27 @@ def test_filter_unsupported_function_raises():
         PlannerService.filter_items(tasks, filter="substring(title, 1)")
 
 
+@pytest.mark.parametrize("expr,field", [
+    ("titel eq 'x'", "titel"),
+    ("titel ne 'x'", "titel"),
+    ("startswith(titel, 'x')", "titel"),
+    ("percentComplete eq 0 and description eq 'x'", "description"),
+], ids=["misspelt-eq", "misspelt-ne", "misspelt-in-function", "detail-field"])
+def test_filter_unknown_field_raises(expr, field):
+    # An unknown field used to read as None: eq matched nothing and ne matched
+    # everything, with no hint that the field name was wrong.
+    tasks = [_make_task()]
+    with pytest.raises(ValueError, match=f"Unknown field in filter: '{field}'"):
+        PlannerService.filter_items(tasks, filter=expr)
+
+
+@pytest.mark.parametrize("expr", ["percentComplete eq 0", "PercentComplete eq 0"], ids=["camel-case", "pascal-case"])
+def test_filter_known_field_any_case_still_works(expr):
+    task = _make_task()
+    task.percent_complete = 0
+    assert PlannerService.filter_items([task], filter=expr) == [task]
+
+
 def test_filter_unsupported_operator_raises():
     tasks = [_make_task()]
     with pytest.raises(ValueError, match="Unsupported filter operator"):
