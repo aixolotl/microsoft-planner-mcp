@@ -142,6 +142,12 @@ async def list_my_tasks(
         if select is not None
         else None
     )
+    # Graph returns only the selected fields; the client-side filter and
+    # search below need theirs too. Without this, a filter on a field left
+    # out of select reads None and returns the wrong tasks.
+    select_fields = PlannerService.select_with_filter_fields(
+        select_fields, filter=filter, search=search, search_fields=["title"]
+    )
 
     async with graph_client_manager.for_user(token.token) as graph_client:
         svc = PlannerService(graph_client)
@@ -225,6 +231,12 @@ async def list_tasks(
         [field.strip() for field in select.split(",") if field.strip()]
         if select is not None
         else None
+    )
+    # Graph returns only the selected fields; the client-side filter and
+    # search below need theirs too. Without this, a filter on a field left
+    # out of select reads None and returns the wrong tasks.
+    select_fields = PlannerService.select_with_filter_fields(
+        select_fields, filter=filter, search=search, search_fields=["title"]
     )
 
     async with graph_client_manager.for_user(token.token) as graph_client:

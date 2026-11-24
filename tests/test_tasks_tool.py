@@ -186,6 +186,29 @@ async def test_list_my_tasks_select(select_arg, expected, graph_ctx):
     assert captured[0].query_parameters.select == expected
 
 
+# Graph returns only the $select fields, so the fields the client-side filter
+# or search reads must be added to select. Without this, percentComplete reads
+# None: "eq 100" matches nothing and "ne 100" matches completed tasks too.
+SELECT_WITH_FILTER_CASES = pytest.mark.parametrize("kwargs,expected", [
+    ({"select": "id,title", "filter": "percentComplete eq 100"}, ["id", "title", "percentComplete"]),
+    ({"select": "id", "filter": "dueDateTime le 2026-11-30 and startswith(title, 'A')"}, ["id", "dueDateTime", "title"]),
+    ({"select": "id", "filter": "hasDescription eq true"}, ["id", "hasDescription"]),
+    ({"select": "id", "search": "bug"}, ["id", "title"]),
+    ({"select": "id,title", "filter": "title eq 'x'"}, ["id", "title"]),
+    ({"select": "*all", "filter": "percentComplete eq 100"}, None),
+], ids=["filter-field-added", "date-and-function", "boolean-literal-not-a-field", "search-adds-title", "already-selected", "star-all-unchanged"])
+
+
+@SELECT_WITH_FILTER_CASES
+async def test_list_my_tasks_selects_filter_fields(kwargs, expected, graph_ctx):
+    graph_client, captured = make_capturing_client()
+
+    with graph_ctx(MODULE, graph_client):
+        await list_my_tasks(**kwargs)
+
+    assert captured[0].query_parameters.select == expected
+
+
 async def test_list_my_tasks_filter_narrows_results(graph_ctx):
     # Client-side filter should remove non-matching tasks from the response.
     # Graph Planner ignores $filter on /me/planner/tasks, so filtering is
@@ -644,6 +667,16 @@ async def test_list_tasks_select(select_arg, expected, graph_ctx):
 
     with graph_ctx(MODULE, graph_client):
         await list_tasks("plan-1", **select_arg)
+
+    assert captured[0].query_parameters.select == expected
+
+
+@SELECT_WITH_FILTER_CASES
+async def test_list_tasks_selects_filter_fields(kwargs, expected, graph_ctx):
+    graph_client, captured = make_plan_capturing_client()
+
+    with graph_ctx(MODULE, graph_client):
+        await list_tasks("plan-1", **kwargs)
 
     assert captured[0].query_parameters.select == expected
 
