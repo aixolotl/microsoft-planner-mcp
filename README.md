@@ -148,7 +148,7 @@ ALLOWED_ORIGINS=["http://localhost:8000","http://localhost:6274"]
 # clients.
 # REQUIRE_AUTHORIZATION_CONSENT=true
 
-# Optional rate-limit overrides (per client sliding window)
+# Optional rate-limit overrides (per user sliding window)
 # Defaults are 120 requests per 1 minute
 # RATE_LIMIT_MAX_REQUESTS=120
 # RATE_LIMIT_WINDOW_MINUTES=1
@@ -556,7 +556,7 @@ The server is built with [FastMCP](https://gofastmcp.com) and uses these key pat
 | Middleware | Purpose |
 |---|---|
 | `ErrorHandlingMiddleware` | Catches unhandled exceptions, logs full traces server-side, returns clean MCP errors |
-| `SlidingWindowRateLimitingMiddleware` | 60 req/min per client to protect the Microsoft Graph quota |
+| `SlidingWindowRateLimitingMiddleware` | 120 req/min per signed-in user (default) to protect the Microsoft Graph quota |
 | `TimingMiddleware` | Records wall-clock duration for every MCP operation |
 | `StructuredLoggingMiddleware` | Emits one JSON log line per request (method, status, duration, client info) |
 | `ResponseLimitingMiddleware` | Truncates tool responses above 500 KB to prevent overflowing LLM context windows |
