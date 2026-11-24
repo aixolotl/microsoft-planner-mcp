@@ -559,7 +559,7 @@ The server is built with [FastMCP](https://gofastmcp.com) and uses these key pat
 | `SlidingWindowRateLimitingMiddleware` | 60 req/min per client to protect the Microsoft Graph quota |
 | `TimingMiddleware` | Records wall-clock duration for every MCP operation |
 | `StructuredLoggingMiddleware` | Emits one JSON log line per request (method, status, duration, client info) |
-| `ResponseLimitingMiddleware` | Truncates tool responses above 500 KB to prevent overflowing LLM context windows |
+| `ResponseSizeLimitMiddleware` | Returns a tool error for tool responses above 500 KB (asking for a narrower `select` / `filter`) to prevent overflowing LLM context windows |
 
 **Client logging** — Every tool sends real-time progress messages to the MCP client via [`get_optional_context()`](https://gofastmcp.com/servers/context#via-get_context-function), so users see status updates like *"Fetching tasks…"* and *"Found 12 task(s)"* in their client.
 

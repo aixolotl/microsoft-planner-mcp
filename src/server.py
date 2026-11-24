@@ -10,12 +10,16 @@ _configure_telemetry()
 
 import logging
 
+import pydantic_core
 from fastmcp import FastMCP
 from fastmcp.server.middleware.error_handling import ErrorHandlingMiddleware
 from fastmcp.server.middleware.logging import StructuredLoggingMiddleware
 from fastmcp.server.middleware.rate_limiting import SlidingWindowRateLimitingMiddleware
 from fastmcp.server.middleware.response_limiting import ResponseLimitingMiddleware
 from fastmcp.server.middleware.timing import TimingMiddleware
+from fastmcp.exceptions import ToolError
+from fastmcp.server.middleware import CallNext, MiddlewareContext
+from fastmcp.tools.base import ToolResult
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
 from starlette.requests import Request
@@ -91,13 +95,32 @@ mcp.add_middleware(TimingMiddleware())
 # Docs: https://gofastmcp.com/servers/middleware#logging
 mcp.add_middleware(StructuredLoggingMiddleware())
 
-# Truncates tool responses that exceed 500 KB. Microsoft Graph list endpoints
+class ResponseSizeLimitMiddleware(ResponseLimitingMiddleware):
+    """ResponseLimitingMiddleware that returns a tool error instead of truncating."""
+
+    async def on_call_tool(self, context: MiddlewareContext, call_next: CallNext) -> ToolResult:
+        result = await call_next(context)
+        # Every tool here has an output schema, so its result must carry
+        # structuredContent. The parent truncates to text only: clients reject
+        # that ("Tool has an output schema but did not return structured
+        # content") and the text is JSON cut mid-object. A tool error needs no
+        # structured content and tells the model how to ask for less.
+        # Docs: https://modelcontextprotocol.io/specification/2025-06-18/server/tools#structured-content
+        if len(pydantic_core.to_json(result, fallback=str)) > self.max_size:
+            raise ToolError(
+                f"The response is larger than {self.max_size:,} bytes. Ask for "
+                "fewer fields with select, or fewer items with filter or search."
+            )
+        return result
+
+
+# Rejects tool responses that exceed 500 KB. Microsoft Graph list endpoints
 # (list_tasks, list_my_tasks) can return very large payloads when a plan has
 # many tasks with full field sets. Without this, an oversized response can
 # overflow the LLM's context window, causing the client to error or silently
 # drop content.
 # Docs: https://gofastmcp.com/servers/middleware#response-limiting
-mcp.add_middleware(ResponseLimitingMiddleware(max_size=500_000))
+mcp.add_middleware(ResponseSizeLimitMiddleware(max_size=500_000))
 
 mcp.mount(me_router)
 mcp.mount(groups_router)
