@@ -5,6 +5,8 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from kiota_abstractions.base_request_configuration import RequestConfiguration
+from kiota_abstractions.headers_collection import HeadersCollection
 
 from msgraph.generated.models.o_data_errors.o_data_error import ODataError
 from msgraph.generated.models.planner_task import PlannerTask
@@ -533,6 +535,29 @@ async def test_paginate_returns_empty_for_none_result():
     rb.request_adapter = MagicMock()
     result = await PlannerService.paginate(rb)
     assert result == []
+
+
+async def test_paginate_sends_request_headers_on_next_pages():
+    # Advanced queries (list_users search/filter, list_my_groups filter) need
+    # ConsistencyLevel: eventual on every request. PageIterator sent page 2+
+    # with empty headers, so the header reached only the first page.
+    first = MagicMock(spec=["value", "odata_next_link"])
+    first.value = [_make_task("Page 1")]
+    first.odata_next_link = "https://graph.microsoft.com/v1.0/users?$skiptoken=2"
+    second = MagicMock(spec=["value", "odata_next_link"])
+    second.value = [_make_task("Page 2")]
+    second.odata_next_link = None
+    rb = MagicMock()
+    rb.get = AsyncMock(return_value=first)
+    rb.request_adapter.send_async = AsyncMock(return_value=second)
+    headers = HeadersCollection()
+    headers.try_add("ConsistencyLevel", "eventual")
+
+    result = await PlannerService.paginate(rb, RequestConfiguration(headers=headers))
+
+    assert [t.title for t in result] == ["Page 1", "Page 2"]
+    next_request = rb.request_adapter.send_async.call_args.args[0]
+    assert next_request.headers.get("consistencylevel") == {"eventual"}
 
 
 async def test_with_retry_sends_fresh_etag_in_if_match_header(make_odata_error):

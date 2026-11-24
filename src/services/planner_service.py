@@ -130,6 +130,13 @@ class PlannerService:
         # sation for each subsequent page request.
         # Docs: https://learn.microsoft.com/en-us/graph/sdks/paging
         page_iterator = PageIterator(result, request_builder.request_adapter)
+        # PageIterator requests every @odata.nextLink page with its own, empty
+        # headers. Without copying them, page 2+ of an advanced query (list_users
+        # search/filter, list_my_groups filter) is sent without the required
+        # ConsistencyLevel: eventual.
+        # Docs: https://learn.microsoft.com/en-us/graph/sdks/paging#request-headers
+        if request_configuration is not None:
+            page_iterator.headers.add_all(request_configuration.headers)
         await page_iterator.iterate(_callback)
         return all_items
 
