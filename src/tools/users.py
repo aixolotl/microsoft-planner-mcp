@@ -31,12 +31,13 @@ _MAX_FILTER_LEN = 2048
 # Docs: https://datatracker.ietf.org/doc/html/rfc4122
 _GUID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$", re.IGNORECASE)
 
-# UPN / email: local part @ domain. Rejects OData control characters (single
-# quotes, whitespace, parentheses) that could break or alter the $filter
-# expression. Intentionally permissive on valid chars — the server will reject
-# truly invalid addresses anyway.
-# Docs: https://learn.microsoft.com/en-us/entra/identity/users/groups-dynamic-membership#rules-for-devices
-_EMAIL_RE = re.compile(r"^[^'\s()@]+@[^'\s()@]+$")
+# UPN / email: local part @ domain. Rejects whitespace and parentheses that
+# could break or alter the $filter expression. An apostrophe is allowed in the
+# local part (a valid UPN character, e.g. o'brien@contoso.com) and escaped by
+# doubling in _build_id_filter. Intentionally permissive on valid chars — the
+# server will reject truly invalid addresses anyway.
+# Docs: https://learn.microsoft.com/en-us/graph/api/resources/user (userPrincipalName)
+_EMAIL_RE = re.compile(r"^[^\s()@]+@[^'\s()@]+$")
 
 
 def _build_id_filter(guids: list[str] | None, emails: list[str] | None) -> str:
@@ -62,7 +63,10 @@ def _build_id_filter(guids: list[str] | None, emails: list[str] | None) -> str:
     for email in (emails or []):
         if not _EMAIL_RE.match(email):
             raise ValueError(f"Invalid email format: {email!r}")
-        clause = f"userPrincipalName eq '{email}'"
+        # OData string literals escape a quote by doubling it. Without this,
+        # o'brien@... would end the literal early and Graph would return 400.
+        # Docs: https://docs.oasis-open.org/odata/odata/v4.01/odata-v4.01-part2-url-conventions.html
+        clause = "userPrincipalName eq '{}'".format(email.replace("'", "''"))
         needed = len(clause) + (len(sep) if clauses else 0)
         if sum(len(c) for c in clauses) + len(sep) * max(len(clauses) - 1, 0) + needed > _MAX_FILTER_LEN:
             break
