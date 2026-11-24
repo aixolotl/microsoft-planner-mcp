@@ -326,6 +326,20 @@ def test_build_id_filter_combined():
     assert result == f"id eq '{_GUID_1}' or userPrincipalName eq 'x@y.com'"
 
 
+@pytest.mark.parametrize("email,expected", [
+    ("o'brien@example.com", "userPrincipalName eq 'o''brien@example.com'"),
+    ("x' or id eq 'y@example.com", None),
+], ids=["apostrophe-escaped", "injection-attempt-still-rejected"])
+def test_build_id_filter_email_with_apostrophe(email, expected):
+    # An apostrophe is a valid UPN character. It used to be rejected outright;
+    # it is now escaped by doubling, which keeps it inside the OData literal.
+    if expected is None:
+        with pytest.raises(ValueError):
+            _build_id_filter(None, [email])
+    else:
+        assert _build_id_filter(None, [email]) == expected
+
+
 def test_build_id_filter_truncates_at_2048_chars():
     # Each GUID clause is "id eq 'xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx'" (44 chars).
     # Generate enough GUIDs to exceed 2 048 characters and verify the result is capped.
@@ -349,8 +363,6 @@ def test_build_id_filter_truncates_at_2048_chars():
         (["not-a-guid"], None),
         # Embedded OData operator
         (["id eq '1') or (1 eq 1"], None),
-        # Single quote in email
-        (None, ["alice'@example.com"]),
         # Parentheses in email
         (None, ["alice(@example.com"]),
         # Spaces in email
@@ -362,7 +374,6 @@ def test_build_id_filter_truncates_at_2048_chars():
         "guid-single-quote",
         "guid-invalid-format",
         "guid-odata-injection",
-        "email-single-quote",
         "email-parentheses",
         "email-spaces",
         "email-no-at-sign",
